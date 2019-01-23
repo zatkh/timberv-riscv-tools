@@ -1,6 +1,7 @@
 [submodule "riscv-isa-sim"]
 	path = riscv-isa-sim
-	url = https://github.com/riscv/riscv-isa-sim.git
+	url = git@github.com:sam1013/riscv-isa-sim.git
+	branch = timberv
 [submodule "riscv-fesvr"]
 	path = riscv-fesvr
 	url = https://github.com/riscv/riscv-fesvr.git
@@ -9,7 +10,8 @@
 	url = https://github.com/riscv/riscv-pk.git
 [submodule "riscv-opcodes"]
 	path = riscv-opcodes
-	url = https://github.com/riscv/riscv-opcodes.git
+	url = git@github.com:sam1013/riscv-opcodes.git
+	branch = timberv
 [submodule "riscv-tests"]
 	path = riscv-tests
 	url = https://github.com/riscv/riscv-tests.git
@@ -19,3 +21,9 @@
 [submodule "riscv-openocd"]
 	path = riscv-openocd
 	url = https://github.com/riscv/riscv-openocd.git
+[submodule "timberv-tag-tests"]
+	path = timberv-tag-tests
+	url = git@github.com:sam1013/timberv-tag-tests.git
+[submodule "timberv-runtime"]
+	path = timberv-runtime
+	url = git@github.com:sam1013/timberv-runtime.git

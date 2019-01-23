@@ -1,0 +1,46 @@
+_RISCV_XLEN=32
+_RISCV=/opt/riscv/${_RISCV_XLEN}
+_RISCVPATH=/opt/riscv/${_RISCV_XLEN}/bin
+TIMBER=riscv${_RISCV_XLEN}-spike
+
+ifdef NOTHING
+########################################################################
+# Put BASH stuff here
+########################################################################
+
+export RISCV_XLEN=${_RISCV_XLEN}
+export RISCV=${_RISCV}
+export PATH=${PATH}:${_RISCVPATH}
+
+if [[ "${VERBOSE}" -gt "0" ]]; then
+  set -x
+fi
+
+########################################################################
+return
+
+else
+
+########################################################################
+# Put Makefile stuff here
+########################################################################
+
+export RISCV_XLEN ?= ${_RISCV_XLEN}
+export RISCV := ${_RISCV}
+export PATH := ${PATH}:${_RISCVPATH}
+
+RISCV_LIB := elf
+TARGET  := ${_RISCVPATH}/riscv${RISCV_XLEN}-unknown-${RISCV_LIB}
+GCC     := $(TARGET)-gcc
+AS      := $(TARGET)-as
+OBJCOPY := $(TARGET)-objcopy
+OBJDUMP := $(TARGET)-objdump
+AR      := $(TARGET)-ar
+RANLIB  := $(TARGET)-ranlib
+SPIKE   := ${_RISCVPATH}/spike
+
+RISCV_ISA ?= rv$(RISCV_XLEN)g
+SPIKE_FLAGS ?= --isa=RV${RISCV_XLEN}IMAFD
+
+########################################################################
+endif

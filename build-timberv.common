@@ -1,0 +1,60 @@
+# Script to build RISC-V ISA simulator, proxy kernel, and GNU toolchain.
+# Tools will be installed to $RISCV.
+
+# Use gmake instead of make if it exists.
+MAKE=`command -v gmake || command -v make`
+
+#GCC_VERSION=`gcc -v 2>&1 | tail -1 | awk '{print $3}'`
+
+set -e
+
+function clean_project {
+  ARCH=$1
+  export RISCV=${RISCVBASE}/${ARCH}
+  PATH="$RISCV/bin:$PATH"
+  BUILD=build${ARCH}
+  shift
+  PROJECT="$1"
+  shift
+  echo
+  if [ -e "$PROJECT/$BUILD" ]
+  then
+    echo "Removing existing $PROJECT/$BUILD directory"
+    rm -rf "$PROJECT/$BUILD"
+  fi
+}
+
+function build_project {
+  ARCH=$1
+  export RISCV=${RISCVBASE}/${ARCH}
+  PATH="$RISCV/bin:$PATH"
+  BUILD=build${ARCH}
+  shift
+  PROJECT="$1"
+  shift
+  echo
+  if [ ! -e "$PROJECT/configure" ]
+  then
+    (
+      cd "$PROJECT"
+      find . -iname configure.ac | sed s/configure.ac/m4/ | xargs mkdir -p
+      autoreconf -i
+    )
+  fi
+  mkdir -p "$PROJECT/$BUILD"
+  cd "$PROJECT/$BUILD"
+  echo "Configuring project $PROJECT"
+  ../configure --prefix=$RISCV $* > build.log
+  echo "Building project $PROJECT"
+  $MAKE -j`nproc` >> build.log
+  echo "Installing project $PROJECT"
+  $MAKE install >> build.log
+  cd - > /dev/null
+}
+
+function update_opcodes {
+  cd riscv-opcodes
+  echo "Updating opcodes"
+  make
+  cd -
+}

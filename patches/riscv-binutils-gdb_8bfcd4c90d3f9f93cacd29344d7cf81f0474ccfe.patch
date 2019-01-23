@@ -1,0 +1,1947 @@
+diff --git a/bfd/bfd-in2.h b/bfd/bfd-in2.h
+index 1343780..c0810fa 100644
+--- a/bfd/bfd-in2.h
++++ b/bfd/bfd-in2.h
+@@ -4772,6 +4772,16 @@ number for the SBIC, SBIS, SBI and CBI instructions  */
+   BFD_RELOC_RISCV_SET8,
+   BFD_RELOC_RISCV_SET16,
+   BFD_RELOC_RISCV_SET32,
++  BFD_RELOC_RISCV_HI22,
++  BFD_RELOC_RISCV_HI24,
++  BFD_RELOC_RISCV_PCREL_HI22,
++  BFD_RELOC_RISCV_PCREL_HI24,
++  BFD_RELOC_RISCV_LO10_IT,
++  BFD_RELOC_RISCV_LO8_ST,
++  BFD_RELOC_RISCV_PCREL_LO10_IT,
++  BFD_RELOC_RISCV_PCREL_LO8_ST,
++  BFD_RELOC_RISCV_TPREL_LO10_IT,
++  BFD_RELOC_RISCV_TPREL_LO8_ST,
+   BFD_RELOC_RISCV_32_PCREL,
+ 
+ /* Renesas RL78 Relocations.  */
+diff --git a/bfd/elf.c b/bfd/elf.c
+index 063a6e4..dd03cc8 100644
+--- a/bfd/elf.c
++++ b/bfd/elf.c
+@@ -4681,6 +4681,8 @@ _bfd_elf_map_sections_to_segments (bfd *abfd, struct bfd_link_info *info)
+ 	    {
+ 	      /* If this section has a load address that makes it overlap
+ 		 the previous section, then we need a new segment.  */
++	      fprintf(stderr, "SEGMENT OVERLAP!\n"); //TODO: seems to cause problems: more than two PT_LOAD program headers with overlapping regions :/
++	      exit(1);
+ 	      new_segment = TRUE;
+ 	    }
+ 	  /* In the next test we have to be careful when last_hdr->lma is close
+diff --git a/bfd/elfnn-riscv.c b/bfd/elfnn-riscv.c
+index 5686247..19d495c 100644
+--- a/bfd/elfnn-riscv.c
++++ b/bfd/elfnn-riscv.c
+@@ -591,6 +591,8 @@ riscv_elf_check_relocs (bfd *abfd, struct bfd_link_info *info,
+ 	case R_RISCV_RVC_BRANCH:
+ 	case R_RISCV_RVC_JUMP:
+ 	case R_RISCV_PCREL_HI20:
++	case R_RISCV_PCREL_HI22:
++	case R_RISCV_PCREL_HI24:
+ 	  /* In shared libraries, these relocs are known to bind locally.  */
+ 	  if (bfd_link_pic (info))
+ 	    break;
+@@ -604,6 +606,8 @@ riscv_elf_check_relocs (bfd *abfd, struct bfd_link_info *info,
+ 	  goto static_reloc;
+ 
+ 	case R_RISCV_HI20:
++	case R_RISCV_HI22:
++	case R_RISCV_HI24:
+ 	  if (bfd_link_pic (info))
+ 	    return bad_static_reloc (abfd, r_type, h);
+ 	  /* Fall through.  */
+@@ -824,7 +828,11 @@ riscv_elf_gc_sweep_hook (bfd *abfd,
+ 	  break;
+ 
+ 	case R_RISCV_HI20:
++	case R_RISCV_HI22:
++	case R_RISCV_HI24:
+ 	case R_RISCV_PCREL_HI20:
++	case R_RISCV_PCREL_HI22:
++	case R_RISCV_PCREL_HI24:
+ 	case R_RISCV_COPY:
+ 	case R_RISCV_JUMP_SLOT:
+ 	case R_RISCV_RELATIVE:
+@@ -1506,6 +1514,22 @@ perform_relocation (const reloc_howto_type *howto,
+       value = ENCODE_UTYPE_IMM (RISCV_CONST_HIGH_PART (value));
+       break;
+ 
++    case R_RISCV_HI22:
++    case R_RISCV_PCREL_HI22:
++      if (ARCH_SIZE > 32 && !VALID_UTYPE_IMM (RISCV_CONST_HIGH22_PART (value))) {
++	return bfd_reloc_overflow;
++      }
++      value = ENCODE_UTYPE_IMM (RISCV_CONST_HIGH22_PART (value));
++      break;
++
++    case R_RISCV_HI24:
++    case R_RISCV_PCREL_HI24:
++      if (ARCH_SIZE > 32 && !VALID_UTYPE_IMM (RISCV_CONST_HIGH24_PART (value))) {
++	return bfd_reloc_overflow;
++      }
++      value = ENCODE_UTYPE_IMM (RISCV_CONST_HIGH24_PART (value));
++      break;
++
+     case R_RISCV_LO12_I:
+     case R_RISCV_GPREL_I:
+     case R_RISCV_TPREL_LO12_I:
+@@ -1522,6 +1546,18 @@ perform_relocation (const reloc_howto_type *howto,
+       value = ENCODE_STYPE_IMM (value);
+       break;
+ 
++    case R_RISCV_LO10_IT:
++    case R_RISCV_TPREL_LO10_IT:
++    case R_RISCV_PCREL_LO10_IT:
++      value = ENCODE_ITTYPE_IMM (value);
++      break;
++
++    case R_RISCV_LO8_ST:
++    case R_RISCV_TPREL_LO8_ST:
++    case R_RISCV_PCREL_LO8_ST:
++      value = ENCODE_STTYPE_IMM (value);
++      break;
++
+     case R_RISCV_CALL:
+     case R_RISCV_CALL_PLT:
+       if (ARCH_SIZE > 32 && !VALID_UTYPE_IMM (RISCV_CONST_HIGH_PART (value)))
+@@ -1700,6 +1736,84 @@ riscv_zero_pcrel_hi_reloc (Elf_Internal_Rela *rel,
+ }
+ 
+ static bfd_boolean
++riscv_zero_pcrel_hi22_reloc (Elf_Internal_Rela *rel,
++			   struct bfd_link_info *info,
++			   bfd_vma pc,
++			   bfd_vma addr,
++			   bfd_byte *contents,
++			   const reloc_howto_type *howto,
++			   bfd *input_bfd)
++{
++  /* We may need to reference low addreses in PC-relative modes even when the
++   * PC is far away from these addresses.  For example, undefweak references
++   * need to produce the address 0 when linked.  As 0 is far from the arbitrary
++   * addresses that we can link PC-relative programs at, the linker can't
++   * actually relocate references to those symbols.  In order to allow these
++   * programs to work we simply convert the PC-relative auipc sequences to
++   * 0-relative lui sequences.  */
++  if (bfd_link_pic (info))
++    return FALSE;
++
++  /* If it's possible to reference the symbol using auipc we do so, as that's
++   * more in the spirit of the PC-relative relocations we're processing.  */
++  bfd_vma offset = addr - pc;
++  if (ARCH_SIZE == 32 || VALID_UTYPE_IMM (RISCV_CONST_HIGH22_PART (offset)))
++    return FALSE;
++
++  /* If it's impossible to reference this with a LUI-based offset then don't
++   * bother to convert it at all so users still see the PC-relative relocation
++   * in the truncation message.  */
++  if (ARCH_SIZE > 32 && !VALID_UTYPE_IMM (RISCV_CONST_HIGH22_PART (addr)))
++    return FALSE;
++
++  rel->r_info = ELFNN_R_INFO(addr, R_RISCV_HI22);
++
++  bfd_vma insn = bfd_get(howto->bitsize, input_bfd, contents + rel->r_offset);
++  insn = (insn & ~MASK_AUIPC) | MATCH_LUI;
++  bfd_put(howto->bitsize, input_bfd, insn, contents + rel->r_offset);
++  return TRUE;
++}
++
++static bfd_boolean
++riscv_zero_pcrel_hi24_reloc (Elf_Internal_Rela *rel,
++			   struct bfd_link_info *info,
++			   bfd_vma pc,
++			   bfd_vma addr,
++			   bfd_byte *contents,
++			   const reloc_howto_type *howto,
++			   bfd *input_bfd)
++{
++  /* We may need to reference low addreses in PC-relative modes even when the
++   * PC is far away from these addresses.  For example, undefweak references
++   * need to produce the address 0 when linked.  As 0 is far from the arbitrary
++   * addresses that we can link PC-relative programs at, the linker can't
++   * actually relocate references to those symbols.  In order to allow these
++   * programs to work we simply convert the PC-relative auipc sequences to
++   * 0-relative lui sequences.  */
++  if (bfd_link_pic (info))
++    return FALSE;
++
++  /* If it's possible to reference the symbol using auipc we do so, as that's
++   * more in the spirit of the PC-relative relocations we're processing.  */
++  bfd_vma offset = addr - pc;
++  if (ARCH_SIZE == 32 || VALID_UTYPE_IMM (RISCV_CONST_HIGH24_PART (offset)))
++    return FALSE;
++
++  /* If it's impossible to reference this with a LUI-based offset then don't
++   * bother to convert it at all so users still see the PC-relative relocation
++   * in the truncation message.  */
++  if (ARCH_SIZE > 32 && !VALID_UTYPE_IMM (RISCV_CONST_HIGH24_PART (addr)))
++    return FALSE;
++
++  rel->r_info = ELFNN_R_INFO(addr, R_RISCV_HI24);
++
++  bfd_vma insn = bfd_get(howto->bitsize, input_bfd, contents + rel->r_offset);
++  insn = (insn & ~MASK_AUIPC) | MATCH_LUI;
++  bfd_put(howto->bitsize, input_bfd, insn, contents + rel->r_offset);
++  return TRUE;
++}
++
++static bfd_boolean
+ riscv_record_pcrel_hi_reloc (riscv_pcrel_relocs *p, bfd_vma addr,
+ 			     bfd_vma value, bfd_boolean absolute)
+ {
+@@ -1895,6 +2009,8 @@ riscv_elf_relocate_section (bfd *output_bfd,
+ 	  continue;
+ 
+ 	case R_RISCV_HI20:
++	case R_RISCV_HI22:
++	case R_RISCV_HI24:
+ 	case R_RISCV_BRANCH:
+ 	case R_RISCV_RVC_BRANCH:
+ 	case R_RISCV_RVC_LUI:
+@@ -2039,6 +2155,8 @@ riscv_elf_relocate_section (bfd *output_bfd,
+ 
+ 	case R_RISCV_TPREL_LO12_I:
+ 	case R_RISCV_TPREL_LO12_S:
++	case R_RISCV_TPREL_LO10_IT:
++	case R_RISCV_TPREL_LO8_ST:
+ 	  relocation = tpoff (info, relocation);
+ 	  break;
+ 
+@@ -2095,6 +2213,40 @@ riscv_elf_relocate_section (bfd *output_bfd,
+ 	    r = bfd_reloc_overflow;
+ 	  break;
+ 
++	case R_RISCV_PCREL_HI22:
++	  absolute = riscv_zero_pcrel_hi22_reloc (rel,
++						info,
++						pc,
++						relocation,
++						contents,
++						howto,
++						input_bfd);
++	  r_type = ELFNN_R_TYPE (rel->r_info);
++	  howto = riscv_elf_rtype_to_howto (r_type);
++	  if (!riscv_record_pcrel_hi_reloc (&pcrel_relocs, pc,
++					    relocation + rel->r_addend,
++					    absolute)) {
++	    r = bfd_reloc_overflow;
++	  }
++	  break;
++
++	case R_RISCV_PCREL_HI24:
++	  absolute = riscv_zero_pcrel_hi24_reloc (rel,
++						info,
++						pc,
++						relocation,
++						contents,
++						howto,
++						input_bfd);
++	  r_type = ELFNN_R_TYPE (rel->r_info);
++	  howto = riscv_elf_rtype_to_howto (r_type);
++	  if (!riscv_record_pcrel_hi_reloc (&pcrel_relocs, pc,
++					    relocation + rel->r_addend,
++					    absolute)) {
++	    r = bfd_reloc_overflow;
++	  }
++	  break;
++
+ 	case R_RISCV_PCREL_LO12_I:
+ 	case R_RISCV_PCREL_LO12_S:
+ 	  if (riscv_record_pcrel_lo_reloc (&pcrel_relocs, input_section, info,
+@@ -2104,6 +2256,24 @@ riscv_elf_relocate_section (bfd *output_bfd,
+ 	  r = bfd_reloc_overflow;
+ 	  break;
+ 
++	case R_RISCV_PCREL_LO10_IT:
++	  /* TODO: is pcrel_lo correct or do we need our own prcrel_low10? */
++	  if (riscv_record_pcrel_lo_reloc (&pcrel_relocs, input_section, info,
++					     howto, rel, relocation, name,
++					     contents))
++	    continue;
++	  r = bfd_reloc_overflow;
++	  break;
++
++	case R_RISCV_PCREL_LO8_ST:
++	  /* TODO: is pcrel_lo correct or do we need our own prcrel_low8? */
++	  if (riscv_record_pcrel_lo_reloc (&pcrel_relocs, input_section, info,
++					    howto, rel, relocation, name,
++					    contents))
++	    continue;
++	  r = bfd_reloc_overflow;
++	  break;
++
+ 	case R_RISCV_TLS_DTPREL32:
+ 	case R_RISCV_TLS_DTPREL64:
+ 	  relocation = dtpoff (info, relocation);
+diff --git a/bfd/elfxx-riscv.c b/bfd/elfxx-riscv.c
+index 55db392..2a4f0d0 100644
+--- a/bfd/elfxx-riscv.c
++++ b/bfd/elfxx-riscv.c
+@@ -841,6 +841,158 @@ static reloc_howto_type howto_table[] =
+ 	 MINUS_ONE,			/* dst_mask */
+ 	 FALSE),			/* pcrel_offset */
+ 
++/* CUSTOM */
++
++  /* High 22 bits of 32-bit absolute address.  */
++  HOWTO (R_RISCV_HI22,			/* type */
++	 0,				/* rightshift */
++	 2,				/* size */
++	 32,				/* bitsize */
++	 FALSE,				/* pc_relative */
++	 0,				/* bitpos */
++	 complain_overflow_dont,	/* complain_on_overflow */
++	 bfd_elf_generic_reloc,		/* special_function */
++	 "R_RISCV_HI22",		/* name */
++	 FALSE,				/* partial_inplace */
++	 0,				/* src_mask */
++	 ENCODE_UTYPE_IMM (-1U),	/* dst_mask */
++	 FALSE),			/* pcrel_offset */
++
++  /* High 24 bits of 32-bit absolute address.  */
++  HOWTO (R_RISCV_HI24,			/* type */
++	 0,				/* rightshift */
++	 2,				/* size */
++	 32,				/* bitsize */
++	 FALSE,				/* pc_relative */
++	 0,				/* bitpos */
++	 complain_overflow_dont,	/* complain_on_overflow */
++	 bfd_elf_generic_reloc,		/* special_function */
++	 "R_RISCV_HI24",		/* name */
++	 FALSE,				/* partial_inplace */
++	 0,				/* src_mask */
++	 ENCODE_UTYPE_IMM (-1U),	/* dst_mask */
++	 FALSE),			/* pcrel_offset */
++
++  /* High 22 bits of 32-bit PC-relative reference.  */
++  HOWTO (R_RISCV_PCREL_HI22,		/* type */
++	 0,				/* rightshift */
++	 2,				/* size */
++	 32,				/* bitsize */
++	 TRUE,				/* pc_relative */
++	 0,				/* bitpos */
++	 complain_overflow_dont,	/* complain_on_overflow */
++	 bfd_elf_generic_reloc,		/* special_function */
++	 "R_RISCV_PCREL_HI22",		/* name */
++	 FALSE,				/* partial_inplace */
++	 0,				/* src_mask */
++	 ENCODE_UTYPE_IMM (-1U),	/* dst_mask */
++	 TRUE),				/* pcrel_offset */
++
++  /* High 24 bits of 32-bit PC-relative reference.  */
++  HOWTO (R_RISCV_PCREL_HI24,		/* type */
++	 0,				/* rightshift */
++	 2,				/* size */
++	 32,				/* bitsize */
++	 TRUE,				/* pc_relative */
++	 0,				/* bitpos */
++	 complain_overflow_dont,	/* complain_on_overflow */
++	 bfd_elf_generic_reloc,		/* special_function */
++	 "R_RISCV_PCREL_HI24",		/* name */
++	 FALSE,				/* partial_inplace */
++	 0,				/* src_mask */
++	 ENCODE_UTYPE_IMM (-1U),	/* dst_mask */
++	 TRUE),				/* pcrel_offset */
++
++  /* Low 10 bits of 32-bit checked load.  */
++  HOWTO (R_RISCV_LO10_IT,		/* type */
++	 0,				/* rightshift */
++	 2,				/* size */
++	 32,				/* bitsize */
++	 FALSE,				/* pc_relative */
++	 0,				/* bitpos */
++	 complain_overflow_dont,	/* complain_on_overflow */
++	 bfd_elf_generic_reloc,		/* special_function */
++	 "R_RISCV_LO10_IT",		/* name */
++	 FALSE,				/* partial_inplace */
++	 0,				/* src_mask */
++	 ENCODE_ITTYPE_IMM (-1U),	/* dst_mask */
++	 FALSE),			/* pcrel_offset */
++
++  /* Low 8 bits of 32-bit checked store.  */
++  HOWTO (R_RISCV_LO8_ST,		/* type */
++	 0,				/* rightshift */
++	 2,				/* size */
++	 32,				/* bitsize */
++	 FALSE,				/* pc_relative */
++	 0,				/* bitpos */
++	 complain_overflow_dont,	/* complain_on_overflow */
++	 bfd_elf_generic_reloc,		/* special_function */
++	 "R_RISCV_LO8_ST",		/* name */
++	 FALSE,				/* partial_inplace */
++	 0,				/* src_mask */
++	 ENCODE_STTYPE_IMM (-1U),	/* dst_mask */
++	 FALSE),			/* pcrel_offset */
++
++  /* Low 10 bits of a 32-bit PC-relative checked load.  */
++  HOWTO (R_RISCV_PCREL_LO10_IT,		/* type */
++	 0,				/* rightshift */
++	 2,				/* size */
++	 32,				/* bitsize */
++	 FALSE,				/* pc_relative */
++	 0,				/* bitpos */
++	 complain_overflow_dont,	/* complain_on_overflow */
++	 bfd_elf_generic_reloc,		/* special_function */
++	 "R_RISCV_PCREL_LO10_IT",	/* name */
++	 FALSE,				/* partial_inplace */
++	 0,				/* src_mask */
++	 ENCODE_ITTYPE_IMM (-1U),	/* dst_mask */
++	 FALSE),			/* pcrel_offset */
++
++  /* Low 8 bits of a 32-bit PC-relative checked store.  */
++  HOWTO (R_RISCV_PCREL_LO8_ST,		/* type */
++	 0,				/* rightshift */
++	 2,				/* size */
++	 32,				/* bitsize */
++	 FALSE,				/* pc_relative */
++	 0,				/* bitpos */
++	 complain_overflow_dont,	/* complain_on_overflow */
++	 bfd_elf_generic_reloc,		/* special_function */
++	 "R_RISCV_PCREL_LO8_ST",	/* name */
++	 FALSE,				/* partial_inplace */
++	 0,				/* src_mask */
++	 ENCODE_STTYPE_IMM (-1U),	/* dst_mask */
++	 FALSE),			/* pcrel_offset */
++
++  /* Low 10 bits of TLS LE thread pointer offset for checked loads.  */
++  HOWTO (R_RISCV_TPREL_LO10_IT,		/* type */
++	 0,				/* rightshift */
++	 2,				/* size */
++	 32,				/* bitsize */
++	 FALSE,				/* pc_relative */
++	 0,				/* bitpos */
++	 complain_overflow_signed,	/* complain_on_overflow */
++	 bfd_elf_generic_reloc,		/* special_function */
++	 "R_RISCV_TPREL_LO10_IT",	/* name */
++	 FALSE,				/* partial_inplace */
++	 0,				/* src_mask */
++	 ENCODE_ITTYPE_IMM (-1U),	/* dst_mask */
++	 FALSE),			/* pcrel_offset */
++
++  /* Low 12 bits of TLS LE thread pointer offset for stores.  */
++  HOWTO (R_RISCV_TPREL_LO8_ST,		/* type */
++	 0,				/* rightshift */
++	 2,				/* size */
++	 32,				/* bitsize */
++	 FALSE,				/* pc_relative */
++	 0,				/* bitpos */
++	 complain_overflow_signed,	/* complain_on_overflow */
++	 bfd_elf_generic_reloc,		/* special_function */
++	 "R_RISCV_TPREL_LO8_ST",	/* name */
++	 FALSE,				/* partial_inplace */
++	 0,				/* src_mask */
++	 ENCODE_STTYPE_IMM (-1U),	/* dst_mask */
++	 FALSE),			/* pcrel_offset */
++
+   /* 32-bit PC relative.  */
+   HOWTO (R_RISCV_32_PCREL,		/* type */
+ 	 0,				/* rightshift */
+@@ -916,6 +1068,17 @@ static const struct elf_reloc_map riscv_reloc_map[] =
+   { BFD_RELOC_RISCV_SET8, R_RISCV_SET8 },
+   { BFD_RELOC_RISCV_SET16, R_RISCV_SET16 },
+   { BFD_RELOC_RISCV_SET32, R_RISCV_SET32 },
++  // CUSTOM
++  { BFD_RELOC_RISCV_HI22, R_RISCV_HI22 },
++  { BFD_RELOC_RISCV_HI24, R_RISCV_HI24 },
++  { BFD_RELOC_RISCV_PCREL_HI22, R_RISCV_PCREL_HI22 },
++  { BFD_RELOC_RISCV_PCREL_HI24, R_RISCV_PCREL_HI24 },
++  { BFD_RELOC_RISCV_LO10_IT, R_RISCV_LO10_IT },
++  { BFD_RELOC_RISCV_LO8_ST, R_RISCV_LO8_ST },
++  { BFD_RELOC_RISCV_PCREL_LO10_IT, R_RISCV_PCREL_LO10_IT },
++  { BFD_RELOC_RISCV_PCREL_LO8_ST, R_RISCV_PCREL_LO8_ST },
++  { BFD_RELOC_RISCV_TPREL_LO10_IT, R_RISCV_TPREL_LO10_IT },
++  { BFD_RELOC_RISCV_TPREL_LO8_ST, R_RISCV_TPREL_LO8_ST },
+   { BFD_RELOC_RISCV_32_PCREL, R_RISCV_32_PCREL },
+ };
+ 
+diff --git a/bfd/libbfd.h b/bfd/libbfd.h
+index ae9bf76..c593593 100644
+--- a/bfd/libbfd.h
++++ b/bfd/libbfd.h
+@@ -2215,6 +2215,16 @@ static const char *const bfd_reloc_code_real_names[] = { "@@uninitialized@@",
+   "BFD_RELOC_RISCV_SET8",
+   "BFD_RELOC_RISCV_SET16",
+   "BFD_RELOC_RISCV_SET32",
++  "BFD_RELOC_RISCV_HI22",
++  "BFD_RELOC_RISCV_HI24",
++  "BFD_RELOC_RISCV_PCREL_HI22",
++  "BFD_RELOC_RISCV_PCREL_HI24",
++  "BFD_RELOC_RISCV_LO10_IT",
++  "BFD_RELOC_RISCV_LO8_ST",
++  "BFD_RELOC_RISCV_PCREL_LO10_IT",
++  "BFD_RELOC_RISCV_PCREL_LO8_ST",
++  "BFD_RELOC_RISCV_TPREL_LO10_IT",
++  "BFD_RELOC_RISCV_TPREL_LO8_ST",
+   "BFD_RELOC_RISCV_32_PCREL",
+   "BFD_RELOC_RL78_NEG8",
+   "BFD_RELOC_RL78_NEG16",
+diff --git a/bfd/reloc.c b/bfd/reloc.c
+index aa70fa58..2a23dde 100644
+--- a/bfd/reloc.c
++++ b/bfd/reloc.c
+@@ -5156,6 +5156,26 @@ ENUMX
+ ENUMX
+   BFD_RELOC_RISCV_SET32
+ ENUMX
++  BFD_RELOC_RISCV_HI22
++ENUMX
++  BFD_RELOC_RISCV_HI24
++ENUMX
++  BFD_RELOC_RISCV_PCREL_HI22
++ENUMX
++  BFD_RELOC_RISCV_PCREL_HI24
++ENUMX
++  BFD_RELOC_RISCV_LO10_IT
++ENUMX
++  BFD_RELOC_RISCV_LO8_ST
++ENUMX
++  BFD_RELOC_RISCV_PCREL_LO10_IT
++ENUMX
++  BFD_RELOC_RISCV_PCREL_LO8_ST
++ENUMX
++  BFD_RELOC_RISCV_TPREL_LO10_IT
++ENUMX
++  BFD_RELOC_RISCV_TPREL_LO8_ST
++ENUMX
+   BFD_RELOC_RISCV_32_PCREL
+ ENUMDOC
+   RISC-V relocations.
+diff --git a/gas/config/tc-riscv.c b/gas/config/tc-riscv.c
+index a4e01b6..28ff2e6 100644
+--- a/gas/config/tc-riscv.c
++++ b/gas/config/tc-riscv.c
+@@ -211,6 +211,12 @@ riscv_set_arch (const char *s)
+ 	  all_subsets++;
+ 	  p++;
+ 	}
++      else if (*p == 'q')
++	{
++	  const char subset[] = {*p, 0};
++	  riscv_add_subset (subset);
++	  p++;
++	}
+       else
+ 	as_fatal ("-march=%s: unsupported ISA subset `%c'", s, *p);
+     }
+@@ -564,11 +570,15 @@ validate_riscv_insn (const struct riscv_opcode *opc)
+       case 't':	USE_BITS (OP_MASK_RS2,		OP_SH_RS2);	break;
+       case 'P':	USE_BITS (OP_MASK_PRED,		OP_SH_PRED); break;
+       case 'Q':	USE_BITS (OP_MASK_SUCC,		OP_SH_SUCC); break;
++      case 'e':	USE_BITS (OP_MASK_ETAG,		OP_SH_ETAG); break;
++      case 'n':	USE_BITS (OP_MASK_NTAG,		OP_SH_NTAG); break;
+       case 'o':
+       case 'j': used_bits |= ENCODE_ITYPE_IMM (-1U); break;
++      case 'Y': used_bits |= ENCODE_ITTYPE_IMM (-1U); break;
+       case 'a':	used_bits |= ENCODE_UJTYPE_IMM (-1U); break;
+       case 'p':	used_bits |= ENCODE_SBTYPE_IMM (-1U); break;
+       case 'q':	used_bits |= ENCODE_STYPE_IMM (-1U); break;
++      case 'X':	used_bits |= ENCODE_STTYPE_IMM (-1U); break;
+       case 'u':	used_bits |= ENCODE_UTYPE_IMM (-1U); break;
+       case '[': break;
+       case ']': break;
+@@ -662,12 +672,24 @@ riscv_apply_const_reloc (bfd_reloc_code_real_type reloc_type, bfd_vma value)
+     case BFD_RELOC_RISCV_HI20:
+       return ENCODE_UTYPE_IMM (RISCV_CONST_HIGH_PART (value));
+ 
++    case BFD_RELOC_RISCV_HI22:
++      return ENCODE_UTYPE_IMM (RISCV_CONST_HIGH22_PART (value));
++
++    case BFD_RELOC_RISCV_HI24:
++      return ENCODE_UTYPE_IMM (RISCV_CONST_HIGH24_PART (value));
++
+     case BFD_RELOC_RISCV_LO12_S:
+       return ENCODE_STYPE_IMM (value);
+ 
+     case BFD_RELOC_RISCV_LO12_I:
+       return ENCODE_ITYPE_IMM (value);
+ 
++    case BFD_RELOC_RISCV_LO8_ST:
++      return ENCODE_STTYPE_IMM (value);
++
++    case BFD_RELOC_RISCV_LO10_IT:
++      return ENCODE_ITTYPE_IMM (value);
++
+     default:
+       abort ();
+     }
+@@ -724,7 +746,11 @@ append_insn (struct riscv_cl_insn *ip, expressionS *address_expr,
+   if (reloc_type == BFD_RELOC_RISCV_CALL
+       || reloc_type == BFD_RELOC_RISCV_CALL_PLT
+       || reloc_type == BFD_RELOC_RISCV_HI20
++      || reloc_type == BFD_RELOC_RISCV_HI22
++      || reloc_type == BFD_RELOC_RISCV_HI24
+       || reloc_type == BFD_RELOC_RISCV_PCREL_HI20
++      || reloc_type == BFD_RELOC_RISCV_PCREL_HI22
++      || reloc_type == BFD_RELOC_RISCV_PCREL_HI24
+       || reloc_type == BFD_RELOC_RISCV_TPREL_HI20
+       || reloc_type == BFD_RELOC_RISCV_TPREL_ADD)
+     {
+@@ -775,6 +801,14 @@ macro_build (expressionS *ep, const char *name, const char *fmt, ...)
+ 	  INSERT_OPERAND (RS2, insn, va_arg (args, int));
+ 	  continue;
+ 
++	case 'e':		/* Expected tag. */
++	  INSERT_OPERAND (ETAG, insn, va_arg (args, int));
++	  continue;
++
++	case 'n':		/* New tag. */
++	  INSERT_OPERAND (NTAG, insn, va_arg (args, int));
++	  continue;
++
+ 	case '>':
+ 	  INSERT_OPERAND (SHAMT, insn, va_arg (args, int));
+ 	  continue;
+@@ -866,6 +900,38 @@ pcrel_store (int srcreg, int tempreg, expressionS *ep, const char *lo_insn,
+   pcrel_access (srcreg, tempreg, ep, lo_insn, "t,s,q", hi_reloc, lo_reloc);
+ }
+ 
++static void
++pcrel_load_tag (int etag, int destreg, int tempreg, expressionS *ep, const char *lo_insn)
++{
++  expressionS ep2;
++  ep2.X_op = O_symbol;
++  ep2.X_add_symbol = make_internal_label ();
++  ep2.X_add_number = 0;
++  expressionS ep3;
++  ep3.X_op = O_symbol;
++  ep3.X_add_symbol = make_internal_label ();
++  ep3.X_add_number = 0;
++  macro_build (ep, "auipc", "d,u", tempreg, BFD_RELOC_RISCV_PCREL_HI20);
++  macro_build (&ep3, "addi", "d,s,j", tempreg, tempreg, BFD_RELOC_RISCV_PCREL_LO12_I);
++  macro_build (&ep2, lo_insn, "e,d,s,j", etag, destreg, tempreg, BFD_RELOC_NONE);
++}
++
++static void
++pcrel_store_tag (int etag, int ntag, int srcreg, int tempreg, expressionS *ep, const char *lo_insn)
++{
++  expressionS ep2;
++  ep2.X_op = O_symbol;
++  ep2.X_add_symbol = make_internal_label ();
++  ep2.X_add_number = 0;
++  expressionS ep3;
++  ep3.X_op = O_symbol;
++  ep3.X_add_symbol = make_internal_label ();
++  ep3.X_add_number = 0;
++  macro_build (ep, "auipc", "d,u", tempreg, BFD_RELOC_RISCV_PCREL_HI20);
++  macro_build (&ep3, "addi", "d,s,j", tempreg, tempreg, BFD_RELOC_RISCV_PCREL_LO12_I);
++  macro_build (&ep2, lo_insn, "e,n,t,s,q", etag, ntag, srcreg, tempreg, BFD_RELOC_NONE);
++}
++
+ /* PC-relative function call using AUIPC/JALR, relaxed to JAL.  */
+ static void
+ riscv_call (int destreg, int tempreg, expressionS *ep,
+@@ -929,6 +995,8 @@ macro (struct riscv_cl_insn *ip, expressionS *imm_expr,
+   int rd = (ip->insn_opcode >> OP_SH_RD) & OP_MASK_RD;
+   int rs1 = (ip->insn_opcode >> OP_SH_RS1) & OP_MASK_RS1;
+   int rs2 = (ip->insn_opcode >> OP_SH_RS2) & OP_MASK_RS2;
++  int etag = (ip->insn_opcode >> OP_SH_ETAG) & OP_MASK_ETAG;
++  int ntag = (ip->insn_opcode >> OP_SH_NTAG) & OP_MASK_NTAG;
+   int mask = ip->insn_mo->mask;
+ 
+   switch (mask)
+@@ -998,6 +1066,34 @@ macro (struct riscv_cl_insn *ip, expressionS *imm_expr,
+ 		  BFD_RELOC_RISCV_PCREL_HI20, BFD_RELOC_RISCV_PCREL_LO12_I);
+       break;
+ 
++    case M_LBCT:
++      pcrel_load_tag (etag, rd, rd, imm_expr, "lbct");
++      break;
++
++    case M_LBUCT:
++      pcrel_load_tag (etag, rd, rd, imm_expr, "lbuct");
++      break;
++
++    case M_LHCT:
++      pcrel_load_tag (etag, rd, rd, imm_expr, "lhct");
++      break;
++
++    case M_LHUCT:
++      pcrel_load_tag (etag, rd, rd, imm_expr, "lhuct");
++      break;
++
++    case M_LWCT:
++      pcrel_load_tag (etag, rd, rd, imm_expr, "lwct");
++      break;
++
++    case M_LWUCT:
++      pcrel_load_tag (etag, rd, rd, imm_expr, "lwuct");
++      break;
++
++    case M_LDCT:
++      pcrel_load_tag (etag, rd, rd, imm_expr, "ldct");
++      break;
++
+     case M_FLW:
+       pcrel_load (rd, rs1, imm_expr, "flw",
+ 		  BFD_RELOC_RISCV_PCREL_HI20, BFD_RELOC_RISCV_PCREL_LO12_I);
+@@ -1028,6 +1124,22 @@ macro (struct riscv_cl_insn *ip, expressionS *imm_expr,
+ 		   BFD_RELOC_RISCV_PCREL_HI20, BFD_RELOC_RISCV_PCREL_LO12_S);
+       break;
+ 
++    case M_SBCT:
++      pcrel_store_tag (etag, ntag, rs2, rs1, imm_expr, "sbct");
++      break;
++
++    case M_SHCT:
++      pcrel_store_tag (etag, ntag, rs2, rs1, imm_expr, "shct");
++      break;
++
++    case M_SWCT:
++      pcrel_store_tag (etag, ntag, rs2, rs1, imm_expr, "swct");
++      break;
++
++    case M_SDCT:
++      pcrel_store_tag (etag, ntag, rs2, rs1, imm_expr, "sdct");
++      break;
++
+     case M_FSW:
+       pcrel_store (rs2, rs1, imm_expr, "fsw",
+ 		   BFD_RELOC_RISCV_PCREL_HI20, BFD_RELOC_RISCV_PCREL_LO12_S);
+@@ -1074,6 +1186,22 @@ static const struct percent_op_match percent_op_stype[] =
+   {0, 0}
+ };
+ 
++static const struct percent_op_match percent_op_ittype[] =
++{
++  {"%lo", BFD_RELOC_RISCV_LO10_IT},
++  {"%tprel_lo", BFD_RELOC_RISCV_TPREL_LO10_IT},
++  {"%pcrel_lo", BFD_RELOC_RISCV_PCREL_LO10_IT},
++  {0, 0}
++};
++
++static const struct percent_op_match percent_op_sttype[] =
++{
++  {"%lo", BFD_RELOC_RISCV_LO8_ST},
++  {"%tprel_lo", BFD_RELOC_RISCV_TPREL_LO8_ST},
++  {"%pcrel_lo", BFD_RELOC_RISCV_PCREL_LO8_ST},
++  {0, 0}
++};
++
+ static const struct percent_op_match percent_op_rtype[] =
+ {
+   {"%tprel_add", BFD_RELOC_RISCV_TPREL_ADD},
+@@ -1218,6 +1346,8 @@ riscv_ip (char *str, struct riscv_cl_insn *ip, expressionS *imm_expr,
+   struct riscv_opcode *insn;
+   char *argsStart;
+   unsigned int regno;
++  unsigned int tag;
++  unsigned int imm_reach;
+   char save_c = 0;
+   int argnum;
+   const struct percent_op_match *p;
+@@ -1584,6 +1714,22 @@ rvc_lui:
+ 		}
+ 	      break;
+ 
++	    case 'e':		/* Expected tag. */
++	      if (arg_lookup (&s, riscv_tags, ARRAY_SIZE (riscv_tags), &tag))
++	      {
++		INSERT_OPERAND (ETAG, *ip, tag);
++		continue;
++	      }
++	      break;
++
++	    case 'n':		/* New tag. */
++	      if (arg_lookup (&s, riscv_tags, ARRAY_SIZE (riscv_tags), &tag))
++	      {
++		INSERT_OPERAND (NTAG, *ip, tag);
++		continue;
++	      }
++	      break;
++
+ 	    case 'D':		/* Floating point rd.  */
+ 	    case 'S':		/* Floating point rs1.  */
+ 	    case 'T':		/* Floating point rs2.  */
+@@ -1638,19 +1784,33 @@ rvc_lui:
+ 
+ 	    case 'j': /* Sign-extended immediate.  */
+ 	      *imm_reloc = BFD_RELOC_RISCV_LO12_I;
++	      imm_reach = RISCV_IMM_REACH;
+ 	      p = percent_op_itype;
+ 	      goto alu_op;
+ 	    case 'q': /* Store displacement.  */
+ 	      p = percent_op_stype;
+ 	      *imm_reloc = BFD_RELOC_RISCV_LO12_S;
++	      imm_reach = RISCV_IMM_REACH;
+ 	      goto load_store;
+ 	    case 'o': /* Load displacement.  */
+ 	      p = percent_op_itype;
+ 	      *imm_reloc = BFD_RELOC_RISCV_LO12_I;
++	      imm_reach = RISCV_IMM_REACH;
++	      goto load_store;
++	    case 'X': /* Store displacement.  */
++	      p = percent_op_sttype;
++	      *imm_reloc = BFD_RELOC_RISCV_LO8_ST;
++	      imm_reach = RISCV_IMM8_REACH;
++	      goto load_store;
++	    case 'Y': /* Load displacement.  */
++	      p = percent_op_ittype;
++	      *imm_reloc = BFD_RELOC_RISCV_LO10_IT;
++	      imm_reach = RISCV_IMM10_REACH;
+ 	      goto load_store;
+ 	    case '0': /* AMO "displacement," which must be zero.  */
+ 	      p = percent_op_rtype;
+ 	      *imm_reloc = BFD_RELOC_UNUSED;
++	      imm_reach = RISCV_IMM_REACH;
+ load_store:
+ 	      if (riscv_handle_implicit_zero_offset (imm_expr, s))
+ 		continue;
+@@ -1663,8 +1823,8 @@ alu_op:
+ 		  normalize_constant_expr (imm_expr);
+ 		  if (imm_expr->X_op != O_constant
+ 		      || (*args == '0' && imm_expr->X_add_number != 0)
+-		      || imm_expr->X_add_number >= (signed)RISCV_IMM_REACH/2
+-		      || imm_expr->X_add_number < -(signed)RISCV_IMM_REACH/2)
++		      || imm_expr->X_add_number >= (signed)imm_reach/2
++		      || imm_expr->X_add_number < -(signed)imm_reach/2)
+ 		    break;
+ 		}
+ 
+@@ -1922,6 +2082,8 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
+     case BFD_RELOC_RISCV_HI20:
+     case BFD_RELOC_RISCV_LO12_I:
+     case BFD_RELOC_RISCV_LO12_S:
++    case BFD_RELOC_RISCV_LO10_IT:
++    case BFD_RELOC_RISCV_LO8_ST:
+       bfd_putl32 (riscv_apply_const_reloc (fixP->fx_r_type, *valP)
+ 		  | bfd_getl32 (buf), buf);
+       if (fixP->fx_addsy == NULL)
+@@ -1929,6 +2091,7 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
+       relaxable = TRUE;
+       break;
+ 
++    case BFD_RELOC_NONE:
+     case BFD_RELOC_RISCV_GOT_HI20:
+     case BFD_RELOC_RISCV_ADD8:
+     case BFD_RELOC_RISCV_ADD16:
+@@ -1945,6 +2108,8 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
+     case BFD_RELOC_RISCV_TPREL_HI20:
+     case BFD_RELOC_RISCV_TPREL_LO12_I:
+     case BFD_RELOC_RISCV_TPREL_LO12_S:
++    case BFD_RELOC_RISCV_TPREL_LO10_IT:
++    case BFD_RELOC_RISCV_TPREL_LO8_ST:
+     case BFD_RELOC_RISCV_TPREL_ADD:
+       relaxable = TRUE;
+       /* Fall through.  */
+@@ -2123,12 +2288,14 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
+       break;
+ 
+     case BFD_RELOC_RISCV_PCREL_HI20:
++    case BFD_RELOC_RISCV_PCREL_HI22:
++    case BFD_RELOC_RISCV_PCREL_HI24:
+     case BFD_RELOC_RISCV_PCREL_LO12_S:
+     case BFD_RELOC_RISCV_PCREL_LO12_I:
+-      relaxable = riscv_opts.relax;
+-      break;
+-
++    case BFD_RELOC_RISCV_PCREL_LO8_ST:
++    case BFD_RELOC_RISCV_PCREL_LO10_IT:
+     case BFD_RELOC_RISCV_ALIGN:
++      relaxable = riscv_opts.relax;
+       break;
+ 
+     default:
+@@ -2141,6 +2308,10 @@ md_apply_fix (fixS *fixP, valueT *valP, segT seg ATTRIBUTE_UNUSED)
+     as_bad_where (fixP->fx_file, fixP->fx_line,
+ 		  _("unsupported symbol subtraction"));
+ 
++  if (fixP->fx_subsy != NULL)
++    as_bad_where (fixP->fx_file, fixP->fx_line,
++		  _("unsupported symbol subtraction"));
++
+   /* Add an R_RISCV_RELAX reloc if the reloc is relaxable.  */
+   if (relaxable && fixP->fx_tcbit && fixP->fx_addsy != NULL)
+     {
+diff --git a/include/elf/riscv.h b/include/elf/riscv.h
+index eecacf8..715e4d5 100644
+--- a/include/elf/riscv.h
++++ b/include/elf/riscv.h
+@@ -87,7 +87,18 @@ START_RELOC_NUMBERS (elf_riscv_reloc_type)
+   RELOC_NUMBER (R_RISCV_SET8, 54)
+   RELOC_NUMBER (R_RISCV_SET16, 55)
+   RELOC_NUMBER (R_RISCV_SET32, 56)
+-  RELOC_NUMBER (R_RISCV_32_PCREL, 57)
++  /* Custom */
++  RELOC_NUMBER (R_RISCV_HI22, 57)
++  RELOC_NUMBER (R_RISCV_HI24, 58)
++  RELOC_NUMBER (R_RISCV_PCREL_HI22, 59)
++  RELOC_NUMBER (R_RISCV_PCREL_HI24, 60)
++  RELOC_NUMBER (R_RISCV_LO10_IT, 61)
++  RELOC_NUMBER (R_RISCV_LO8_ST, 62)
++  RELOC_NUMBER (R_RISCV_PCREL_LO10_IT, 63)
++  RELOC_NUMBER (R_RISCV_PCREL_LO8_ST, 64)
++  RELOC_NUMBER (R_RISCV_TPREL_LO10_IT, 65)
++  RELOC_NUMBER (R_RISCV_TPREL_LO8_ST, 66)
++  RELOC_NUMBER (R_RISCV_32_PCREL, 67)
+ END_RELOC_NUMBERS (R_RISCV_max)
+ 
+ /* Processor specific flags for the ELF header e_flags field.  */
+diff --git a/include/opcode/riscv-opc.h b/include/opcode/riscv-opc.h
+index 64635e1..b175f57 100644
+--- a/include/opcode/riscv-opc.h
++++ b/include/opcode/riscv-opc.h
+@@ -39,6 +39,10 @@
+ #define MASK_SCALL  0xffffffff
+ #define MATCH_SBREAK 0x100073
+ #define MASK_SBREAK  0xffffffff
++#define MATCH_FMV_X_S 0xe0000053
++#define MASK_FMV_X_S  0xfff0707f
++#define MATCH_FMV_S_X 0xf0000053
++#define MASK_FMV_S_X  0xfff0707f
+ #define MATCH_BEQ 0x63
+ #define MASK_BEQ  0x707f
+ #define MATCH_BNE 0x1063
+@@ -141,6 +145,10 @@
+ #define MASK_FENCE  0x707f
+ #define MATCH_FENCE_I 0x100f
+ #define MASK_FENCE_I  0x707f
++#define MATCH_LTAG 0x57
++#define MASK_LTAG  0x707f
++#define MATCH_STAG 0x1057
++#define MASK_STAG  0x707f
+ #define MATCH_MUL 0x2000033
+ #define MASK_MUL  0xfe00707f
+ #define MATCH_MULH 0x2001033
+@@ -219,14 +227,10 @@
+ #define MASK_URET  0xffffffff
+ #define MATCH_SRET 0x10200073
+ #define MASK_SRET  0xffffffff
+-#define MATCH_HRET 0x20200073
+-#define MASK_HRET  0xffffffff
+ #define MATCH_MRET 0x30200073
+ #define MASK_MRET  0xffffffff
+ #define MATCH_DRET 0x7b200073
+ #define MASK_DRET  0xffffffff
+-#define MATCH_SFENCE_VM 0x10400073
+-#define MASK_SFENCE_VM  0xfff07fff
+ #define MATCH_SFENCE_VMA 0x12000073
+ #define MASK_SFENCE_VMA  0xfe007fff
+ #define MATCH_WFI 0x10500073
+@@ -341,8 +345,8 @@
+ #define MASK_FCVT_L_S  0xfff0007f
+ #define MATCH_FCVT_LU_S 0xc0300053
+ #define MASK_FCVT_LU_S  0xfff0007f
+-#define MATCH_FMV_X_S 0xe0000053
+-#define MASK_FMV_X_S  0xfff0707f
++#define MATCH_FMV_X_W 0xe0000053
++#define MASK_FMV_X_W  0xfff0707f
+ #define MATCH_FCLASS_S 0xe0001053
+ #define MASK_FCLASS_S  0xfff0707f
+ #define MATCH_FCVT_W_D 0xc2000053
+@@ -377,8 +381,8 @@
+ #define MASK_FCVT_S_L  0xfff0007f
+ #define MATCH_FCVT_S_LU 0xd0300053
+ #define MASK_FCVT_S_LU  0xfff0007f
+-#define MATCH_FMV_S_X 0xf0000053
+-#define MASK_FMV_S_X  0xfff0707f
++#define MATCH_FMV_W_X 0xf0000053
++#define MASK_FMV_W_X  0xfff0707f
+ #define MATCH_FCVT_D_W 0xd2000053
+ #define MASK_FCVT_D_W  0xfff0007f
+ #define MATCH_FCVT_D_WU 0xd2100053
+@@ -519,30 +523,30 @@
+ #define MASK_C_LDSP  0xe003
+ #define MATCH_C_SDSP 0xe002
+ #define MASK_C_SDSP  0xe003
+-#define MATCH_CUSTOM0 0xb
+-#define MASK_CUSTOM0  0x707f
+-#define MATCH_CUSTOM0_RS1 0x200b
+-#define MASK_CUSTOM0_RS1  0x707f
+-#define MATCH_CUSTOM0_RS1_RS2 0x300b
+-#define MASK_CUSTOM0_RS1_RS2  0x707f
+-#define MATCH_CUSTOM0_RD 0x400b
+-#define MASK_CUSTOM0_RD  0x707f
+-#define MATCH_CUSTOM0_RD_RS1 0x600b
+-#define MASK_CUSTOM0_RD_RS1  0x707f
+-#define MATCH_CUSTOM0_RD_RS1_RS2 0x700b
+-#define MASK_CUSTOM0_RD_RS1_RS2  0x707f
+-#define MATCH_CUSTOM1 0x2b
+-#define MASK_CUSTOM1  0x707f
+-#define MATCH_CUSTOM1_RS1 0x202b
+-#define MASK_CUSTOM1_RS1  0x707f
+-#define MATCH_CUSTOM1_RS1_RS2 0x302b
+-#define MASK_CUSTOM1_RS1_RS2  0x707f
+-#define MATCH_CUSTOM1_RD 0x402b
+-#define MASK_CUSTOM1_RD  0x707f
+-#define MATCH_CUSTOM1_RD_RS1 0x602b
+-#define MASK_CUSTOM1_RD_RS1  0x707f
+-#define MATCH_CUSTOM1_RD_RS1_RS2 0x702b
+-#define MASK_CUSTOM1_RD_RS1_RS2  0x707f
++#define MATCH_LBCT 0xb
++#define MASK_LBCT  0x707f
++#define MATCH_LHCT 0x100b
++#define MASK_LHCT  0x707f
++#define MATCH_LWCT 0x200b
++#define MASK_LWCT  0x707f
++#define MATCH_LDCT 0x300b
++#define MASK_LDCT  0x707f
++#define MATCH_LBUCT 0x400b
++#define MASK_LBUCT  0x707f
++#define MATCH_LHUCT 0x500b
++#define MASK_LHUCT  0x707f
++#define MATCH_LWUCT 0x600b
++#define MASK_LWUCT  0x707f
++#define MATCH_LTT 0x700b
++#define MASK_LTT  0x707f
++#define MATCH_SBCT 0x2b
++#define MASK_SBCT  0x707f
++#define MATCH_SHCT 0x102b
++#define MASK_SHCT  0x707f
++#define MATCH_SWCT 0x202b
++#define MASK_SWCT  0x707f
++#define MATCH_SDCT 0x302b
++#define MASK_SDCT  0x707f
+ #define MATCH_CUSTOM2 0x5b
+ #define MASK_CUSTOM2  0x707f
+ #define MATCH_CUSTOM2_RS1 0x205b
+@@ -567,17 +571,10 @@
+ #define MASK_CUSTOM3_RD_RS1  0x707f
+ #define MATCH_CUSTOM3_RD_RS1_RS2 0x707b
+ #define MASK_CUSTOM3_RD_RS1_RS2  0x707f
+-#define CSR_USTATUS 0x0
+-#define CSR_UIE 0x4
+-#define CSR_UTVEC 0x5
+-#define CSR_USCRATCH 0x40
+-#define CSR_UEPC 0x41
+-#define CSR_UCAUSE 0x42
+-#define CSR_UTVAL 0x43
+-#define CSR_UIP 0x44
+ #define CSR_FFLAGS 0x1
+ #define CSR_FRM 0x2
+ #define CSR_FCSR 0x3
++#define CSR_TRACE 0x4
+ #define CSR_CYCLE 0xc00
+ #define CSR_TIME 0xc01
+ #define CSR_INSTRET 0xc02
+@@ -610,54 +607,44 @@
+ #define CSR_HPMCOUNTER29 0xc1d
+ #define CSR_HPMCOUNTER30 0xc1e
+ #define CSR_HPMCOUNTER31 0xc1f
+-#define CSR_CYCLEH 0xc80
+-#define CSR_TIMEH 0xc81
+-#define CSR_INSTRETH 0xc82
+-#define CSR_HPMCOUNTER3H 0xc83
+-#define CSR_HPMCOUNTER4H 0xc84
+-#define CSR_HPMCOUNTER5H 0xc85
+-#define CSR_HPMCOUNTER6H 0xc86
+-#define CSR_HPMCOUNTER7H 0xc87
+-#define CSR_HPMCOUNTER8H 0xc88
+-#define CSR_HPMCOUNTER9H 0xc89
+-#define CSR_HPMCOUNTER10H 0xc8a
+-#define CSR_HPMCOUNTER11H 0xc8b
+-#define CSR_HPMCOUNTER12H 0xc8c
+-#define CSR_HPMCOUNTER13H 0xc8d
+-#define CSR_HPMCOUNTER14H 0xc8e
+-#define CSR_HPMCOUNTER15H 0xc8f
+-#define CSR_HPMCOUNTER16H 0xc90
+-#define CSR_HPMCOUNTER17H 0xc91
+-#define CSR_HPMCOUNTER18H 0xc92
+-#define CSR_HPMCOUNTER19H 0xc93
+-#define CSR_HPMCOUNTER20H 0xc94
+-#define CSR_HPMCOUNTER21H 0xc95
+-#define CSR_HPMCOUNTER22H 0xc96
+-#define CSR_HPMCOUNTER23H 0xc97
+-#define CSR_HPMCOUNTER24H 0xc98
+-#define CSR_HPMCOUNTER25H 0xc99
+-#define CSR_HPMCOUNTER26H 0xc9a
+-#define CSR_HPMCOUNTER27H 0xc9b
+-#define CSR_HPMCOUNTER28H 0xc9c
+-#define CSR_HPMCOUNTER29H 0xc9d
+-#define CSR_HPMCOUNTER30H 0xc9e
+-#define CSR_HPMCOUNTER31H 0xc9f
+ #define CSR_SSTATUS 0x100
+-#define CSR_SEDELEG 0x102
+-#define CSR_SIDELEG 0x103
+ #define CSR_SIE 0x104
+ #define CSR_STVEC 0x105
+ #define CSR_SCOUNTEREN 0x106
+ #define CSR_SSCRATCH 0x140
+ #define CSR_SEPC 0x141
+ #define CSR_SCAUSE 0x142
+-#define CSR_SBADADDR 0x143
++#define CSR_STVAL 0x143
+ #define CSR_SIP 0x144
+ #define CSR_SATP 0x180
+-#define CSR_MVENDORID 0xf11
+-#define CSR_MARCHID 0xf12
+-#define CSR_MIMPID 0xf13
+-#define CSR_MHARTID 0xf14
++#define CSR_SPMPBASE0 0x5c0
++#define CSR_SPMPBOUND0 0x5c1
++#define CSR_SPMPFLAGS0 0x5c2
++#define CSR_SPMPBASE1 0x5c4
++#define CSR_SPMPBOUND1 0x5c5
++#define CSR_SPMPFLAGS1 0x5c6
++#define CSR_SPMPBASE2 0x5c8
++#define CSR_SPMPBOUND2 0x5c9
++#define CSR_SPMPFLAGS2 0x5ca
++#define CSR_SPMPBASE3 0x5cc
++#define CSR_SPMPBOUND3 0x5cd
++#define CSR_SPMPFLAGS3 0x5ce
++#define CSR_SPMPBASE4 0x5d0
++#define CSR_SPMPBOUND4 0x5d1
++#define CSR_SPMPFLAGS4 0x5d2
++#define CSR_SPMPBASE5 0x5d4
++#define CSR_SPMPBOUND5 0x5d5
++#define CSR_SPMPFLAGS5 0x5d6
++#define CSR_SPMPBASE6 0x5d8
++#define CSR_SPMPBOUND6 0x5d9
++#define CSR_SPMPFLAGS6 0x5da
++#define CSR_SPMPBASE7 0x5dc
++#define CSR_SPMPBOUND7 0x5dd
++#define CSR_SPMPFLAGS7 0x5de
++#define CSR_STSTATUS 0x5f0
++#define CSR_STTCB 0x5f1
++#define CSR_STTVEC 0x5f2
++#define CSR_STSCRATCH 0x5f3
+ #define CSR_MSTATUS 0x300
+ #define CSR_MISA 0x301
+ #define CSR_MEDELEG 0x302
+@@ -668,7 +655,7 @@
+ #define CSR_MSCRATCH 0x340
+ #define CSR_MEPC 0x341
+ #define CSR_MCAUSE 0x342
+-#define CSR_MBADADDR 0x343
++#define CSR_MTVAL 0x343
+ #define CSR_MIP 0x344
+ #define CSR_PMPCFG0 0x3a0
+ #define CSR_PMPCFG1 0x3a1
+@@ -690,6 +677,13 @@
+ #define CSR_PMPADDR13 0x3bd
+ #define CSR_PMPADDR14 0x3be
+ #define CSR_PMPADDR15 0x3bf
++#define CSR_TSELECT 0x7a0
++#define CSR_TDATA1 0x7a1
++#define CSR_TDATA2 0x7a2
++#define CSR_TDATA3 0x7a3
++#define CSR_DCSR 0x7b0
++#define CSR_DPC 0x7b1
++#define CSR_DSCRATCH 0x7b2
+ #define CSR_MCYCLE 0xb00
+ #define CSR_MINSTRET 0xb02
+ #define CSR_MHPMCOUNTER3 0xb03
+@@ -721,6 +715,97 @@
+ #define CSR_MHPMCOUNTER29 0xb1d
+ #define CSR_MHPMCOUNTER30 0xb1e
+ #define CSR_MHPMCOUNTER31 0xb1f
++#define CSR_MHPMEVENT3 0x323
++#define CSR_MHPMEVENT4 0x324
++#define CSR_MHPMEVENT5 0x325
++#define CSR_MHPMEVENT6 0x326
++#define CSR_MHPMEVENT7 0x327
++#define CSR_MHPMEVENT8 0x328
++#define CSR_MHPMEVENT9 0x329
++#define CSR_MHPMEVENT10 0x32a
++#define CSR_MHPMEVENT11 0x32b
++#define CSR_MHPMEVENT12 0x32c
++#define CSR_MHPMEVENT13 0x32d
++#define CSR_MHPMEVENT14 0x32e
++#define CSR_MHPMEVENT15 0x32f
++#define CSR_MHPMEVENT16 0x330
++#define CSR_MHPMEVENT17 0x331
++#define CSR_MHPMEVENT18 0x332
++#define CSR_MHPMEVENT19 0x333
++#define CSR_MHPMEVENT20 0x334
++#define CSR_MHPMEVENT21 0x335
++#define CSR_MHPMEVENT22 0x336
++#define CSR_MHPMEVENT23 0x337
++#define CSR_MHPMEVENT24 0x338
++#define CSR_MHPMEVENT25 0x339
++#define CSR_MHPMEVENT26 0x33a
++#define CSR_MHPMEVENT27 0x33b
++#define CSR_MHPMEVENT28 0x33c
++#define CSR_MHPMEVENT29 0x33d
++#define CSR_MHPMEVENT30 0x33e
++#define CSR_MHPMEVENT31 0x33f
++#define CSR_MPMPBASE0 0x7c0
++#define CSR_MPMPBOUND0 0x7c1
++#define CSR_MPMPFLAGS0 0x7c2
++#define CSR_MPMPBASE1 0x7c4
++#define CSR_MPMPBOUND1 0x7c5
++#define CSR_MPMPFLAGS1 0x7c6
++#define CSR_MPMPBASE2 0x7c8
++#define CSR_MPMPBOUND2 0x7c9
++#define CSR_MPMPFLAGS2 0x7ca
++#define CSR_MPMPBASE3 0x7cc
++#define CSR_MPMPBOUND3 0x7cd
++#define CSR_MPMPFLAGS3 0x7ce
++#define CSR_MPMPBASE4 0x7d0
++#define CSR_MPMPBOUND4 0x7d1
++#define CSR_MPMPFLAGS4 0x7d2
++#define CSR_MPMPBASE5 0x7d4
++#define CSR_MPMPBOUND5 0x7d5
++#define CSR_MPMPFLAGS5 0x7d6
++#define CSR_MPMPBASE6 0x7d8
++#define CSR_MPMPBOUND6 0x7d9
++#define CSR_MPMPFLAGS6 0x7da
++#define CSR_MPMPBASE7 0x7dc
++#define CSR_MPMPBOUND7 0x7dd
++#define CSR_MPMPFLAGS7 0x7de
++#define CSR_MTSTATUS 0x7f0
++#define CSR_MTTCB 0x7f1
++#define CSR_MVENDORID 0xf11
++#define CSR_MARCHID 0xf12
++#define CSR_MIMPID 0xf13
++#define CSR_MHARTID 0xf14
++#define CSR_CYCLEH 0xc80
++#define CSR_TIMEH 0xc81
++#define CSR_INSTRETH 0xc82
++#define CSR_HPMCOUNTER3H 0xc83
++#define CSR_HPMCOUNTER4H 0xc84
++#define CSR_HPMCOUNTER5H 0xc85
++#define CSR_HPMCOUNTER6H 0xc86
++#define CSR_HPMCOUNTER7H 0xc87
++#define CSR_HPMCOUNTER8H 0xc88
++#define CSR_HPMCOUNTER9H 0xc89
++#define CSR_HPMCOUNTER10H 0xc8a
++#define CSR_HPMCOUNTER11H 0xc8b
++#define CSR_HPMCOUNTER12H 0xc8c
++#define CSR_HPMCOUNTER13H 0xc8d
++#define CSR_HPMCOUNTER14H 0xc8e
++#define CSR_HPMCOUNTER15H 0xc8f
++#define CSR_HPMCOUNTER16H 0xc90
++#define CSR_HPMCOUNTER17H 0xc91
++#define CSR_HPMCOUNTER18H 0xc92
++#define CSR_HPMCOUNTER19H 0xc93
++#define CSR_HPMCOUNTER20H 0xc94
++#define CSR_HPMCOUNTER21H 0xc95
++#define CSR_HPMCOUNTER22H 0xc96
++#define CSR_HPMCOUNTER23H 0xc97
++#define CSR_HPMCOUNTER24H 0xc98
++#define CSR_HPMCOUNTER25H 0xc99
++#define CSR_HPMCOUNTER26H 0xc9a
++#define CSR_HPMCOUNTER27H 0xc9b
++#define CSR_HPMCOUNTER28H 0xc9c
++#define CSR_HPMCOUNTER29H 0xc9d
++#define CSR_HPMCOUNTER30H 0xc9e
++#define CSR_HPMCOUNTER31H 0xc9f
+ #define CSR_MCYCLEH 0xb80
+ #define CSR_MINSTRETH 0xb82
+ #define CSR_MHPMCOUNTER3H 0xb83
+@@ -752,75 +837,22 @@
+ #define CSR_MHPMCOUNTER29H 0xb9d
+ #define CSR_MHPMCOUNTER30H 0xb9e
+ #define CSR_MHPMCOUNTER31H 0xb9f
+-#define CSR_MHPMEVENT3 0x323
+-#define CSR_MHPMEVENT4 0x324
+-#define CSR_MHPMEVENT5 0x325
+-#define CSR_MHPMEVENT6 0x326
+-#define CSR_MHPMEVENT7 0x327
+-#define CSR_MHPMEVENT8 0x328
+-#define CSR_MHPMEVENT9 0x329
+-#define CSR_MHPMEVENT10 0x32a
+-#define CSR_MHPMEVENT11 0x32b
+-#define CSR_MHPMEVENT12 0x32c
+-#define CSR_MHPMEVENT13 0x32d
+-#define CSR_MHPMEVENT14 0x32e
+-#define CSR_MHPMEVENT15 0x32f
+-#define CSR_MHPMEVENT16 0x330
+-#define CSR_MHPMEVENT17 0x331
+-#define CSR_MHPMEVENT18 0x332
+-#define CSR_MHPMEVENT19 0x333
+-#define CSR_MHPMEVENT20 0x334
+-#define CSR_MHPMEVENT21 0x335
+-#define CSR_MHPMEVENT22 0x336
+-#define CSR_MHPMEVENT23 0x337
+-#define CSR_MHPMEVENT24 0x338
+-#define CSR_MHPMEVENT25 0x339
+-#define CSR_MHPMEVENT26 0x33a
+-#define CSR_MHPMEVENT27 0x33b
+-#define CSR_MHPMEVENT28 0x33c
+-#define CSR_MHPMEVENT29 0x33d
+-#define CSR_MHPMEVENT30 0x33e
+-#define CSR_MHPMEVENT31 0x33f
+-#define CSR_TSELECT 0x7a0
+-#define CSR_TDATA1 0x7a1
+-#define CSR_TDATA2 0x7a2
+-#define CSR_TDATA3 0x7a3
+-#define CSR_DCSR 0x7b0
+-#define CSR_DPC 0x7b1
+-#define CSR_DSCRATCH 0x7b2
+-/* These registers are present in priv spec 1.9.1, dropped in 1.10.  */
+-#define CSR_HSTATUS 0x200
+-#define CSR_HEDELEG 0x202
+-#define CSR_HIDELEG 0x203
+-#define CSR_HIE 0x204
+-#define CSR_HTVEC 0x205
+-#define CSR_HSCRATCH 0x240
+-#define CSR_HEPC 0x241
+-#define CSR_HCAUSE 0x242
+-#define CSR_HBADADDR 0x243
+-#define CSR_HIP 0x244
+-/* CSR_MISA is 0xf10 in 1.9, but 0x301 in 1.9.1.  */
+-#define CSR_MBASE 0x380
+-#define CSR_MBOUND 0x381
+-#define CSR_MIBASE 0x382
+-#define CSR_MIBOUND 0x383
+-#define CSR_MDBASE 0x384
+-#define CSR_MDBOUND 0x385
+-#define CSR_MUCOUNTEREN 0x320
+-#define CSR_MSCOUNTEREN 0x321
+-#define CSR_MHCOUNTEREN 0x322
+ #define CAUSE_MISALIGNED_FETCH 0x0
+-#define CAUSE_FAULT_FETCH 0x1
++#define CAUSE_FETCH_ACCESS 0x1
+ #define CAUSE_ILLEGAL_INSTRUCTION 0x2
+ #define CAUSE_BREAKPOINT 0x3
+ #define CAUSE_MISALIGNED_LOAD 0x4
+-#define CAUSE_FAULT_LOAD 0x5
++#define CAUSE_LOAD_ACCESS 0x5
+ #define CAUSE_MISALIGNED_STORE 0x6
+-#define CAUSE_FAULT_STORE 0x7
++#define CAUSE_STORE_ACCESS 0x7
+ #define CAUSE_USER_ECALL 0x8
+ #define CAUSE_SUPERVISOR_ECALL 0x9
+ #define CAUSE_HYPERVISOR_ECALL 0xa
+ #define CAUSE_MACHINE_ECALL 0xb
++#define CAUSE_TAG_MISMATCH 0xe
++#define CAUSE_FETCH_PAGE_FAULT 0xc
++#define CAUSE_LOAD_PAGE_FAULT 0xd
++#define CAUSE_STORE_PAGE_FAULT 0xf
+ #endif
+ #ifdef DECLARE_INSN
+ DECLARE_INSN(slli_rv32, MATCH_SLLI_RV32, MASK_SLLI_RV32)
+@@ -842,6 +874,8 @@ DECLARE_INSN(rdtimeh, MATCH_RDTIMEH, MASK_RDTIMEH)
+ DECLARE_INSN(rdinstreth, MATCH_RDINSTRETH, MASK_RDINSTRETH)
+ DECLARE_INSN(scall, MATCH_SCALL, MASK_SCALL)
+ DECLARE_INSN(sbreak, MATCH_SBREAK, MASK_SBREAK)
++DECLARE_INSN(fmv_x_s, MATCH_FMV_X_S, MASK_FMV_X_S)
++DECLARE_INSN(fmv_s_x, MATCH_FMV_S_X, MASK_FMV_S_X)
+ DECLARE_INSN(beq, MATCH_BEQ, MASK_BEQ)
+ DECLARE_INSN(bne, MATCH_BNE, MASK_BNE)
+ DECLARE_INSN(blt, MATCH_BLT, MASK_BLT)
+@@ -893,6 +927,8 @@ DECLARE_INSN(sw, MATCH_SW, MASK_SW)
+ DECLARE_INSN(sd, MATCH_SD, MASK_SD)
+ DECLARE_INSN(fence, MATCH_FENCE, MASK_FENCE)
+ DECLARE_INSN(fence_i, MATCH_FENCE_I, MASK_FENCE_I)
++DECLARE_INSN(ltag, MATCH_LTAG, MASK_LTAG)
++DECLARE_INSN(stag, MATCH_STAG, MASK_STAG)
+ DECLARE_INSN(mul, MATCH_MUL, MASK_MUL)
+ DECLARE_INSN(mulh, MATCH_MULH, MASK_MULH)
+ DECLARE_INSN(mulhsu, MATCH_MULHSU, MASK_MULHSU)
+@@ -932,10 +968,8 @@ DECLARE_INSN(ecall, MATCH_ECALL, MASK_ECALL)
+ DECLARE_INSN(ebreak, MATCH_EBREAK, MASK_EBREAK)
+ DECLARE_INSN(uret, MATCH_URET, MASK_URET)
+ DECLARE_INSN(sret, MATCH_SRET, MASK_SRET)
+-DECLARE_INSN(hret, MATCH_HRET, MASK_HRET)
+ DECLARE_INSN(mret, MATCH_MRET, MASK_MRET)
+ DECLARE_INSN(dret, MATCH_DRET, MASK_DRET)
+-DECLARE_INSN(sfence_vm, MATCH_SFENCE_VM, MASK_SFENCE_VM)
+ DECLARE_INSN(sfence_vma, MATCH_SFENCE_VMA, MASK_SFENCE_VMA)
+ DECLARE_INSN(wfi, MATCH_WFI, MASK_WFI)
+ DECLARE_INSN(csrrw, MATCH_CSRRW, MASK_CSRRW)
+@@ -993,7 +1027,7 @@ DECLARE_INSN(fcvt_w_s, MATCH_FCVT_W_S, MASK_FCVT_W_S)
+ DECLARE_INSN(fcvt_wu_s, MATCH_FCVT_WU_S, MASK_FCVT_WU_S)
+ DECLARE_INSN(fcvt_l_s, MATCH_FCVT_L_S, MASK_FCVT_L_S)
+ DECLARE_INSN(fcvt_lu_s, MATCH_FCVT_LU_S, MASK_FCVT_LU_S)
+-DECLARE_INSN(fmv_x_s, MATCH_FMV_X_S, MASK_FMV_X_S)
++DECLARE_INSN(fmv_x_w, MATCH_FMV_X_W, MASK_FMV_X_W)
+ DECLARE_INSN(fclass_s, MATCH_FCLASS_S, MASK_FCLASS_S)
+ DECLARE_INSN(fcvt_w_d, MATCH_FCVT_W_D, MASK_FCVT_W_D)
+ DECLARE_INSN(fcvt_wu_d, MATCH_FCVT_WU_D, MASK_FCVT_WU_D)
+@@ -1011,7 +1045,7 @@ DECLARE_INSN(fcvt_s_w, MATCH_FCVT_S_W, MASK_FCVT_S_W)
+ DECLARE_INSN(fcvt_s_wu, MATCH_FCVT_S_WU, MASK_FCVT_S_WU)
+ DECLARE_INSN(fcvt_s_l, MATCH_FCVT_S_L, MASK_FCVT_S_L)
+ DECLARE_INSN(fcvt_s_lu, MATCH_FCVT_S_LU, MASK_FCVT_S_LU)
+-DECLARE_INSN(fmv_s_x, MATCH_FMV_S_X, MASK_FMV_S_X)
++DECLARE_INSN(fmv_w_x, MATCH_FMV_W_X, MASK_FMV_W_X)
+ DECLARE_INSN(fcvt_d_w, MATCH_FCVT_D_W, MASK_FCVT_D_W)
+ DECLARE_INSN(fcvt_d_wu, MATCH_FCVT_D_WU, MASK_FCVT_D_WU)
+ DECLARE_INSN(fcvt_d_l, MATCH_FCVT_D_L, MASK_FCVT_D_L)
+@@ -1082,18 +1116,18 @@ DECLARE_INSN(c_sd, MATCH_C_SD, MASK_C_SD)
+ DECLARE_INSN(c_addiw, MATCH_C_ADDIW, MASK_C_ADDIW)
+ DECLARE_INSN(c_ldsp, MATCH_C_LDSP, MASK_C_LDSP)
+ DECLARE_INSN(c_sdsp, MATCH_C_SDSP, MASK_C_SDSP)
+-DECLARE_INSN(custom0, MATCH_CUSTOM0, MASK_CUSTOM0)
+-DECLARE_INSN(custom0_rs1, MATCH_CUSTOM0_RS1, MASK_CUSTOM0_RS1)
+-DECLARE_INSN(custom0_rs1_rs2, MATCH_CUSTOM0_RS1_RS2, MASK_CUSTOM0_RS1_RS2)
+-DECLARE_INSN(custom0_rd, MATCH_CUSTOM0_RD, MASK_CUSTOM0_RD)
+-DECLARE_INSN(custom0_rd_rs1, MATCH_CUSTOM0_RD_RS1, MASK_CUSTOM0_RD_RS1)
+-DECLARE_INSN(custom0_rd_rs1_rs2, MATCH_CUSTOM0_RD_RS1_RS2, MASK_CUSTOM0_RD_RS1_RS2)
+-DECLARE_INSN(custom1, MATCH_CUSTOM1, MASK_CUSTOM1)
+-DECLARE_INSN(custom1_rs1, MATCH_CUSTOM1_RS1, MASK_CUSTOM1_RS1)
+-DECLARE_INSN(custom1_rs1_rs2, MATCH_CUSTOM1_RS1_RS2, MASK_CUSTOM1_RS1_RS2)
+-DECLARE_INSN(custom1_rd, MATCH_CUSTOM1_RD, MASK_CUSTOM1_RD)
+-DECLARE_INSN(custom1_rd_rs1, MATCH_CUSTOM1_RD_RS1, MASK_CUSTOM1_RD_RS1)
+-DECLARE_INSN(custom1_rd_rs1_rs2, MATCH_CUSTOM1_RD_RS1_RS2, MASK_CUSTOM1_RD_RS1_RS2)
++DECLARE_INSN(lbct, MATCH_LBCT, MASK_LBCT)
++DECLARE_INSN(lhct, MATCH_LHCT, MASK_LHCT)
++DECLARE_INSN(lwct, MATCH_LWCT, MASK_LWCT)
++DECLARE_INSN(ldct, MATCH_LDCT, MASK_LDCT)
++DECLARE_INSN(lbuct, MATCH_LBUCT, MASK_LBUCT)
++DECLARE_INSN(lhuct, MATCH_LHUCT, MASK_LHUCT)
++DECLARE_INSN(lwuct, MATCH_LWUCT, MASK_LWUCT)
++DECLARE_INSN(ltt, MATCH_LTT, MASK_LTT)
++DECLARE_INSN(sbct, MATCH_SBCT, MASK_SBCT)
++DECLARE_INSN(shct, MATCH_SHCT, MASK_SHCT)
++DECLARE_INSN(swct, MATCH_SWCT, MASK_SWCT)
++DECLARE_INSN(sdct, MATCH_SDCT, MASK_SDCT)
+ DECLARE_INSN(custom2, MATCH_CUSTOM2, MASK_CUSTOM2)
+ DECLARE_INSN(custom2_rs1, MATCH_CUSTOM2_RS1, MASK_CUSTOM2_RS1)
+ DECLARE_INSN(custom2_rs1_rs2, MATCH_CUSTOM2_RS1_RS2, MASK_CUSTOM2_RS1_RS2)
+@@ -1108,17 +1142,10 @@ DECLARE_INSN(custom3_rd_rs1, MATCH_CUSTOM3_RD_RS1, MASK_CUSTOM3_RD_RS1)
+ DECLARE_INSN(custom3_rd_rs1_rs2, MATCH_CUSTOM3_RD_RS1_RS2, MASK_CUSTOM3_RD_RS1_RS2)
+ #endif
+ #ifdef DECLARE_CSR
+-DECLARE_CSR(ustatus, CSR_USTATUS)
+-DECLARE_CSR(uie, CSR_UIE)
+-DECLARE_CSR(utvec, CSR_UTVEC)
+-DECLARE_CSR(uscratch, CSR_USCRATCH)
+-DECLARE_CSR(uepc, CSR_UEPC)
+-DECLARE_CSR(ucause, CSR_UCAUSE)
+-DECLARE_CSR(utval, CSR_UTVAL)
+-DECLARE_CSR(uip, CSR_UIP)
+ DECLARE_CSR(fflags, CSR_FFLAGS)
+ DECLARE_CSR(frm, CSR_FRM)
+ DECLARE_CSR(fcsr, CSR_FCSR)
++DECLARE_CSR(trace, CSR_TRACE)
+ DECLARE_CSR(cycle, CSR_CYCLE)
+ DECLARE_CSR(time, CSR_TIME)
+ DECLARE_CSR(instret, CSR_INSTRET)
+@@ -1151,54 +1178,44 @@ DECLARE_CSR(hpmcounter28, CSR_HPMCOUNTER28)
+ DECLARE_CSR(hpmcounter29, CSR_HPMCOUNTER29)
+ DECLARE_CSR(hpmcounter30, CSR_HPMCOUNTER30)
+ DECLARE_CSR(hpmcounter31, CSR_HPMCOUNTER31)
+-DECLARE_CSR(cycleh, CSR_CYCLEH)
+-DECLARE_CSR(timeh, CSR_TIMEH)
+-DECLARE_CSR(instreth, CSR_INSTRETH)
+-DECLARE_CSR(hpmcounter3h, CSR_HPMCOUNTER3H)
+-DECLARE_CSR(hpmcounter4h, CSR_HPMCOUNTER4H)
+-DECLARE_CSR(hpmcounter5h, CSR_HPMCOUNTER5H)
+-DECLARE_CSR(hpmcounter6h, CSR_HPMCOUNTER6H)
+-DECLARE_CSR(hpmcounter7h, CSR_HPMCOUNTER7H)
+-DECLARE_CSR(hpmcounter8h, CSR_HPMCOUNTER8H)
+-DECLARE_CSR(hpmcounter9h, CSR_HPMCOUNTER9H)
+-DECLARE_CSR(hpmcounter10h, CSR_HPMCOUNTER10H)
+-DECLARE_CSR(hpmcounter11h, CSR_HPMCOUNTER11H)
+-DECLARE_CSR(hpmcounter12h, CSR_HPMCOUNTER12H)
+-DECLARE_CSR(hpmcounter13h, CSR_HPMCOUNTER13H)
+-DECLARE_CSR(hpmcounter14h, CSR_HPMCOUNTER14H)
+-DECLARE_CSR(hpmcounter15h, CSR_HPMCOUNTER15H)
+-DECLARE_CSR(hpmcounter16h, CSR_HPMCOUNTER16H)
+-DECLARE_CSR(hpmcounter17h, CSR_HPMCOUNTER17H)
+-DECLARE_CSR(hpmcounter18h, CSR_HPMCOUNTER18H)
+-DECLARE_CSR(hpmcounter19h, CSR_HPMCOUNTER19H)
+-DECLARE_CSR(hpmcounter20h, CSR_HPMCOUNTER20H)
+-DECLARE_CSR(hpmcounter21h, CSR_HPMCOUNTER21H)
+-DECLARE_CSR(hpmcounter22h, CSR_HPMCOUNTER22H)
+-DECLARE_CSR(hpmcounter23h, CSR_HPMCOUNTER23H)
+-DECLARE_CSR(hpmcounter24h, CSR_HPMCOUNTER24H)
+-DECLARE_CSR(hpmcounter25h, CSR_HPMCOUNTER25H)
+-DECLARE_CSR(hpmcounter26h, CSR_HPMCOUNTER26H)
+-DECLARE_CSR(hpmcounter27h, CSR_HPMCOUNTER27H)
+-DECLARE_CSR(hpmcounter28h, CSR_HPMCOUNTER28H)
+-DECLARE_CSR(hpmcounter29h, CSR_HPMCOUNTER29H)
+-DECLARE_CSR(hpmcounter30h, CSR_HPMCOUNTER30H)
+-DECLARE_CSR(hpmcounter31h, CSR_HPMCOUNTER31H)
+ DECLARE_CSR(sstatus, CSR_SSTATUS)
+-DECLARE_CSR(sedeleg, CSR_SEDELEG)
+-DECLARE_CSR(sideleg, CSR_SIDELEG)
+ DECLARE_CSR(sie, CSR_SIE)
+ DECLARE_CSR(stvec, CSR_STVEC)
+ DECLARE_CSR(scounteren, CSR_SCOUNTEREN)
+ DECLARE_CSR(sscratch, CSR_SSCRATCH)
+ DECLARE_CSR(sepc, CSR_SEPC)
+ DECLARE_CSR(scause, CSR_SCAUSE)
+-DECLARE_CSR(sbadaddr, CSR_SBADADDR)
++DECLARE_CSR(stval, CSR_STVAL)
+ DECLARE_CSR(sip, CSR_SIP)
+ DECLARE_CSR(satp, CSR_SATP)
+-DECLARE_CSR(mvendorid, CSR_MVENDORID)
+-DECLARE_CSR(marchid, CSR_MARCHID)
+-DECLARE_CSR(mimpid, CSR_MIMPID)
+-DECLARE_CSR(mhartid, CSR_MHARTID)
++DECLARE_CSR(spmpbase0, CSR_SPMPBASE0)
++DECLARE_CSR(spmpbound0, CSR_SPMPBOUND0)
++DECLARE_CSR(spmpflags0, CSR_SPMPFLAGS0)
++DECLARE_CSR(spmpbase1, CSR_SPMPBASE1)
++DECLARE_CSR(spmpbound1, CSR_SPMPBOUND1)
++DECLARE_CSR(spmpflags1, CSR_SPMPFLAGS1)
++DECLARE_CSR(spmpbase2, CSR_SPMPBASE2)
++DECLARE_CSR(spmpbound2, CSR_SPMPBOUND2)
++DECLARE_CSR(spmpflags2, CSR_SPMPFLAGS2)
++DECLARE_CSR(spmpbase3, CSR_SPMPBASE3)
++DECLARE_CSR(spmpbound3, CSR_SPMPBOUND3)
++DECLARE_CSR(spmpflags3, CSR_SPMPFLAGS3)
++DECLARE_CSR(spmpbase4, CSR_SPMPBASE4)
++DECLARE_CSR(spmpbound4, CSR_SPMPBOUND4)
++DECLARE_CSR(spmpflags4, CSR_SPMPFLAGS4)
++DECLARE_CSR(spmpbase5, CSR_SPMPBASE5)
++DECLARE_CSR(spmpbound5, CSR_SPMPBOUND5)
++DECLARE_CSR(spmpflags5, CSR_SPMPFLAGS5)
++DECLARE_CSR(spmpbase6, CSR_SPMPBASE6)
++DECLARE_CSR(spmpbound6, CSR_SPMPBOUND6)
++DECLARE_CSR(spmpflags6, CSR_SPMPFLAGS6)
++DECLARE_CSR(spmpbase7, CSR_SPMPBASE7)
++DECLARE_CSR(spmpbound7, CSR_SPMPBOUND7)
++DECLARE_CSR(spmpflags7, CSR_SPMPFLAGS7)
++DECLARE_CSR(ststatus, CSR_STSTATUS)
++DECLARE_CSR(sttcb, CSR_STTCB)
++DECLARE_CSR(sttvec, CSR_STTVEC)
++DECLARE_CSR(stscratch, CSR_STSCRATCH)
+ DECLARE_CSR(mstatus, CSR_MSTATUS)
+ DECLARE_CSR(misa, CSR_MISA)
+ DECLARE_CSR(medeleg, CSR_MEDELEG)
+@@ -1209,7 +1226,7 @@ DECLARE_CSR(mcounteren, CSR_MCOUNTEREN)
+ DECLARE_CSR(mscratch, CSR_MSCRATCH)
+ DECLARE_CSR(mepc, CSR_MEPC)
+ DECLARE_CSR(mcause, CSR_MCAUSE)
+-DECLARE_CSR(mbadaddr, CSR_MBADADDR)
++DECLARE_CSR(mtval, CSR_MTVAL)
+ DECLARE_CSR(mip, CSR_MIP)
+ DECLARE_CSR(pmpcfg0, CSR_PMPCFG0)
+ DECLARE_CSR(pmpcfg1, CSR_PMPCFG1)
+@@ -1231,6 +1248,13 @@ DECLARE_CSR(pmpaddr12, CSR_PMPADDR12)
+ DECLARE_CSR(pmpaddr13, CSR_PMPADDR13)
+ DECLARE_CSR(pmpaddr14, CSR_PMPADDR14)
+ DECLARE_CSR(pmpaddr15, CSR_PMPADDR15)
++DECLARE_CSR(tselect, CSR_TSELECT)
++DECLARE_CSR(tdata1, CSR_TDATA1)
++DECLARE_CSR(tdata2, CSR_TDATA2)
++DECLARE_CSR(tdata3, CSR_TDATA3)
++DECLARE_CSR(dcsr, CSR_DCSR)
++DECLARE_CSR(dpc, CSR_DPC)
++DECLARE_CSR(dscratch, CSR_DSCRATCH)
+ DECLARE_CSR(mcycle, CSR_MCYCLE)
+ DECLARE_CSR(minstret, CSR_MINSTRET)
+ DECLARE_CSR(mhpmcounter3, CSR_MHPMCOUNTER3)
+@@ -1262,6 +1286,97 @@ DECLARE_CSR(mhpmcounter28, CSR_MHPMCOUNTER28)
+ DECLARE_CSR(mhpmcounter29, CSR_MHPMCOUNTER29)
+ DECLARE_CSR(mhpmcounter30, CSR_MHPMCOUNTER30)
+ DECLARE_CSR(mhpmcounter31, CSR_MHPMCOUNTER31)
++DECLARE_CSR(mhpmevent3, CSR_MHPMEVENT3)
++DECLARE_CSR(mhpmevent4, CSR_MHPMEVENT4)
++DECLARE_CSR(mhpmevent5, CSR_MHPMEVENT5)
++DECLARE_CSR(mhpmevent6, CSR_MHPMEVENT6)
++DECLARE_CSR(mhpmevent7, CSR_MHPMEVENT7)
++DECLARE_CSR(mhpmevent8, CSR_MHPMEVENT8)
++DECLARE_CSR(mhpmevent9, CSR_MHPMEVENT9)
++DECLARE_CSR(mhpmevent10, CSR_MHPMEVENT10)
++DECLARE_CSR(mhpmevent11, CSR_MHPMEVENT11)
++DECLARE_CSR(mhpmevent12, CSR_MHPMEVENT12)
++DECLARE_CSR(mhpmevent13, CSR_MHPMEVENT13)
++DECLARE_CSR(mhpmevent14, CSR_MHPMEVENT14)
++DECLARE_CSR(mhpmevent15, CSR_MHPMEVENT15)
++DECLARE_CSR(mhpmevent16, CSR_MHPMEVENT16)
++DECLARE_CSR(mhpmevent17, CSR_MHPMEVENT17)
++DECLARE_CSR(mhpmevent18, CSR_MHPMEVENT18)
++DECLARE_CSR(mhpmevent19, CSR_MHPMEVENT19)
++DECLARE_CSR(mhpmevent20, CSR_MHPMEVENT20)
++DECLARE_CSR(mhpmevent21, CSR_MHPMEVENT21)
++DECLARE_CSR(mhpmevent22, CSR_MHPMEVENT22)
++DECLARE_CSR(mhpmevent23, CSR_MHPMEVENT23)
++DECLARE_CSR(mhpmevent24, CSR_MHPMEVENT24)
++DECLARE_CSR(mhpmevent25, CSR_MHPMEVENT25)
++DECLARE_CSR(mhpmevent26, CSR_MHPMEVENT26)
++DECLARE_CSR(mhpmevent27, CSR_MHPMEVENT27)
++DECLARE_CSR(mhpmevent28, CSR_MHPMEVENT28)
++DECLARE_CSR(mhpmevent29, CSR_MHPMEVENT29)
++DECLARE_CSR(mhpmevent30, CSR_MHPMEVENT30)
++DECLARE_CSR(mhpmevent31, CSR_MHPMEVENT31)
++DECLARE_CSR(mpmpbase0, CSR_MPMPBASE0)
++DECLARE_CSR(mpmpbound0, CSR_MPMPBOUND0)
++DECLARE_CSR(mpmpflags0, CSR_MPMPFLAGS0)
++DECLARE_CSR(mpmpbase1, CSR_MPMPBASE1)
++DECLARE_CSR(mpmpbound1, CSR_MPMPBOUND1)
++DECLARE_CSR(mpmpflags1, CSR_MPMPFLAGS1)
++DECLARE_CSR(mpmpbase2, CSR_MPMPBASE2)
++DECLARE_CSR(mpmpbound2, CSR_MPMPBOUND2)
++DECLARE_CSR(mpmpflags2, CSR_MPMPFLAGS2)
++DECLARE_CSR(mpmpbase3, CSR_MPMPBASE3)
++DECLARE_CSR(mpmpbound3, CSR_MPMPBOUND3)
++DECLARE_CSR(mpmpflags3, CSR_MPMPFLAGS3)
++DECLARE_CSR(mpmpbase4, CSR_MPMPBASE4)
++DECLARE_CSR(mpmpbound4, CSR_MPMPBOUND4)
++DECLARE_CSR(mpmpflags4, CSR_MPMPFLAGS4)
++DECLARE_CSR(mpmpbase5, CSR_MPMPBASE5)
++DECLARE_CSR(mpmpbound5, CSR_MPMPBOUND5)
++DECLARE_CSR(mpmpflags5, CSR_MPMPFLAGS5)
++DECLARE_CSR(mpmpbase6, CSR_MPMPBASE6)
++DECLARE_CSR(mpmpbound6, CSR_MPMPBOUND6)
++DECLARE_CSR(mpmpflags6, CSR_MPMPFLAGS6)
++DECLARE_CSR(mpmpbase7, CSR_MPMPBASE7)
++DECLARE_CSR(mpmpbound7, CSR_MPMPBOUND7)
++DECLARE_CSR(mpmpflags7, CSR_MPMPFLAGS7)
++DECLARE_CSR(mtstatus, CSR_MTSTATUS)
++DECLARE_CSR(mttcb, CSR_MTTCB)
++DECLARE_CSR(mvendorid, CSR_MVENDORID)
++DECLARE_CSR(marchid, CSR_MARCHID)
++DECLARE_CSR(mimpid, CSR_MIMPID)
++DECLARE_CSR(mhartid, CSR_MHARTID)
++DECLARE_CSR(cycleh, CSR_CYCLEH)
++DECLARE_CSR(timeh, CSR_TIMEH)
++DECLARE_CSR(instreth, CSR_INSTRETH)
++DECLARE_CSR(hpmcounter3h, CSR_HPMCOUNTER3H)
++DECLARE_CSR(hpmcounter4h, CSR_HPMCOUNTER4H)
++DECLARE_CSR(hpmcounter5h, CSR_HPMCOUNTER5H)
++DECLARE_CSR(hpmcounter6h, CSR_HPMCOUNTER6H)
++DECLARE_CSR(hpmcounter7h, CSR_HPMCOUNTER7H)
++DECLARE_CSR(hpmcounter8h, CSR_HPMCOUNTER8H)
++DECLARE_CSR(hpmcounter9h, CSR_HPMCOUNTER9H)
++DECLARE_CSR(hpmcounter10h, CSR_HPMCOUNTER10H)
++DECLARE_CSR(hpmcounter11h, CSR_HPMCOUNTER11H)
++DECLARE_CSR(hpmcounter12h, CSR_HPMCOUNTER12H)
++DECLARE_CSR(hpmcounter13h, CSR_HPMCOUNTER13H)
++DECLARE_CSR(hpmcounter14h, CSR_HPMCOUNTER14H)
++DECLARE_CSR(hpmcounter15h, CSR_HPMCOUNTER15H)
++DECLARE_CSR(hpmcounter16h, CSR_HPMCOUNTER16H)
++DECLARE_CSR(hpmcounter17h, CSR_HPMCOUNTER17H)
++DECLARE_CSR(hpmcounter18h, CSR_HPMCOUNTER18H)
++DECLARE_CSR(hpmcounter19h, CSR_HPMCOUNTER19H)
++DECLARE_CSR(hpmcounter20h, CSR_HPMCOUNTER20H)
++DECLARE_CSR(hpmcounter21h, CSR_HPMCOUNTER21H)
++DECLARE_CSR(hpmcounter22h, CSR_HPMCOUNTER22H)
++DECLARE_CSR(hpmcounter23h, CSR_HPMCOUNTER23H)
++DECLARE_CSR(hpmcounter24h, CSR_HPMCOUNTER24H)
++DECLARE_CSR(hpmcounter25h, CSR_HPMCOUNTER25H)
++DECLARE_CSR(hpmcounter26h, CSR_HPMCOUNTER26H)
++DECLARE_CSR(hpmcounter27h, CSR_HPMCOUNTER27H)
++DECLARE_CSR(hpmcounter28h, CSR_HPMCOUNTER28H)
++DECLARE_CSR(hpmcounter29h, CSR_HPMCOUNTER29H)
++DECLARE_CSR(hpmcounter30h, CSR_HPMCOUNTER30H)
++DECLARE_CSR(hpmcounter31h, CSR_HPMCOUNTER31H)
+ DECLARE_CSR(mcycleh, CSR_MCYCLEH)
+ DECLARE_CSR(minstreth, CSR_MINSTRETH)
+ DECLARE_CSR(mhpmcounter3h, CSR_MHPMCOUNTER3H)
+@@ -1293,80 +1408,22 @@ DECLARE_CSR(mhpmcounter28h, CSR_MHPMCOUNTER28H)
+ DECLARE_CSR(mhpmcounter29h, CSR_MHPMCOUNTER29H)
+ DECLARE_CSR(mhpmcounter30h, CSR_MHPMCOUNTER30H)
+ DECLARE_CSR(mhpmcounter31h, CSR_MHPMCOUNTER31H)
+-DECLARE_CSR(mhpmevent3, CSR_MHPMEVENT3)
+-DECLARE_CSR(mhpmevent4, CSR_MHPMEVENT4)
+-DECLARE_CSR(mhpmevent5, CSR_MHPMEVENT5)
+-DECLARE_CSR(mhpmevent6, CSR_MHPMEVENT6)
+-DECLARE_CSR(mhpmevent7, CSR_MHPMEVENT7)
+-DECLARE_CSR(mhpmevent8, CSR_MHPMEVENT8)
+-DECLARE_CSR(mhpmevent9, CSR_MHPMEVENT9)
+-DECLARE_CSR(mhpmevent10, CSR_MHPMEVENT10)
+-DECLARE_CSR(mhpmevent11, CSR_MHPMEVENT11)
+-DECLARE_CSR(mhpmevent12, CSR_MHPMEVENT12)
+-DECLARE_CSR(mhpmevent13, CSR_MHPMEVENT13)
+-DECLARE_CSR(mhpmevent14, CSR_MHPMEVENT14)
+-DECLARE_CSR(mhpmevent15, CSR_MHPMEVENT15)
+-DECLARE_CSR(mhpmevent16, CSR_MHPMEVENT16)
+-DECLARE_CSR(mhpmevent17, CSR_MHPMEVENT17)
+-DECLARE_CSR(mhpmevent18, CSR_MHPMEVENT18)
+-DECLARE_CSR(mhpmevent19, CSR_MHPMEVENT19)
+-DECLARE_CSR(mhpmevent20, CSR_MHPMEVENT20)
+-DECLARE_CSR(mhpmevent21, CSR_MHPMEVENT21)
+-DECLARE_CSR(mhpmevent22, CSR_MHPMEVENT22)
+-DECLARE_CSR(mhpmevent23, CSR_MHPMEVENT23)
+-DECLARE_CSR(mhpmevent24, CSR_MHPMEVENT24)
+-DECLARE_CSR(mhpmevent25, CSR_MHPMEVENT25)
+-DECLARE_CSR(mhpmevent26, CSR_MHPMEVENT26)
+-DECLARE_CSR(mhpmevent27, CSR_MHPMEVENT27)
+-DECLARE_CSR(mhpmevent28, CSR_MHPMEVENT28)
+-DECLARE_CSR(mhpmevent29, CSR_MHPMEVENT29)
+-DECLARE_CSR(mhpmevent30, CSR_MHPMEVENT30)
+-DECLARE_CSR(mhpmevent31, CSR_MHPMEVENT31)
+-DECLARE_CSR(tselect, CSR_TSELECT)
+-DECLARE_CSR(tdata1, CSR_TDATA1)
+-DECLARE_CSR(tdata2, CSR_TDATA2)
+-DECLARE_CSR(tdata3, CSR_TDATA3)
+-DECLARE_CSR(dcsr, CSR_DCSR)
+-DECLARE_CSR(dpc, CSR_DPC)
+-DECLARE_CSR(dscratch, CSR_DSCRATCH)
+-/* These registers are present in priv spec 1.9.1, dropped in 1.10.  */
+-DECLARE_CSR(hstatus, CSR_HSTATUS)
+-DECLARE_CSR(hedeleg, CSR_HEDELEG)
+-DECLARE_CSR(hideleg, CSR_HIDELEG)
+-DECLARE_CSR(hie, CSR_HIE)
+-DECLARE_CSR(htvec, CSR_HTVEC)
+-DECLARE_CSR(hscratch, CSR_HSCRATCH)
+-DECLARE_CSR(hepc, CSR_HEPC)
+-DECLARE_CSR(hcause, CSR_HCAUSE)
+-DECLARE_CSR(hbadaddr, CSR_HBADADDR)
+-DECLARE_CSR(hip, CSR_HIP)
+-DECLARE_CSR(mbase, CSR_MBASE)
+-DECLARE_CSR(mbound, CSR_MBOUND)
+-DECLARE_CSR(mibase, CSR_MIBASE)
+-DECLARE_CSR(mibound, CSR_MIBOUND)
+-DECLARE_CSR(mdbase, CSR_MDBASE)
+-DECLARE_CSR(mdbound, CSR_MDBOUND)
+-DECLARE_CSR(mucounteren, CSR_MUCOUNTEREN)
+-DECLARE_CSR(mscounteren, CSR_MSCOUNTEREN)
+-DECLARE_CSR(mhcounteren, CSR_MHCOUNTEREN)
+-#endif
+-#ifdef DECLARE_CSR_ALIAS
+-/* Ubadaddr is 0x043 in 1.9.1, but 0x043 is utval in 1.10.  */
+-DECLARE_CSR_ALIAS(ubadaddr, CSR_UTVAL)
+-/* Sptbr is 0x180 in 1.9.1, but 0x180 is satp in 1.10.  */
+-DECLARE_CSR_ALIAS(sptbr, CSR_SATP)
+ #endif
+ #ifdef DECLARE_CAUSE
+ DECLARE_CAUSE("misaligned fetch", CAUSE_MISALIGNED_FETCH)
+-DECLARE_CAUSE("fault fetch", CAUSE_FAULT_FETCH)
++DECLARE_CAUSE("fetch access", CAUSE_FETCH_ACCESS)
+ DECLARE_CAUSE("illegal instruction", CAUSE_ILLEGAL_INSTRUCTION)
+ DECLARE_CAUSE("breakpoint", CAUSE_BREAKPOINT)
+ DECLARE_CAUSE("misaligned load", CAUSE_MISALIGNED_LOAD)
+-DECLARE_CAUSE("fault load", CAUSE_FAULT_LOAD)
++DECLARE_CAUSE("load access", CAUSE_LOAD_ACCESS)
+ DECLARE_CAUSE("misaligned store", CAUSE_MISALIGNED_STORE)
+-DECLARE_CAUSE("fault store", CAUSE_FAULT_STORE)
++DECLARE_CAUSE("store access", CAUSE_STORE_ACCESS)
+ DECLARE_CAUSE("user_ecall", CAUSE_USER_ECALL)
+ DECLARE_CAUSE("supervisor_ecall", CAUSE_SUPERVISOR_ECALL)
+ DECLARE_CAUSE("hypervisor_ecall", CAUSE_HYPERVISOR_ECALL)
+ DECLARE_CAUSE("machine_ecall", CAUSE_MACHINE_ECALL)
++DECLARE_CAUSE("tag_mismatch", CAUSE_TAG_MISMATCH)
++DECLARE_CAUSE("fetch page fault", CAUSE_FETCH_PAGE_FAULT)
++DECLARE_CAUSE("load page fault", CAUSE_LOAD_PAGE_FAULT)
++DECLARE_CAUSE("store page fault", CAUSE_STORE_PAGE_FAULT)
+ #endif
+diff --git a/include/opcode/riscv.h b/include/opcode/riscv.h
+index 015e781..fb8ae4f 100644
+--- a/include/opcode/riscv.h
++++ b/include/opcode/riscv.h
+@@ -46,6 +46,11 @@ static const char * const riscv_rm[8] =
+   "rne", "rtz", "rdn", "rup", "rmm", 0, 0, "dyn"
+ };
+ 
++static const char * const riscv_tags[4] =
++{
++  "n", "c", "ut", "st"
++};
++
+ static const char * const riscv_pred_succ[16] =
+ {
+   0,   "w",  "r",  "rw",  "o",  "ow",  "or",  "orw",
+@@ -58,13 +63,24 @@ static const char * const riscv_pred_succ[16] =
+ #define RVC_BRANCH_BITS 8
+ #define RVC_BRANCH_REACH ((1ULL << RVC_BRANCH_BITS) * RISCV_BRANCH_ALIGN)
+ 
++/*
++ * x ... value
++ * s ... shift right
++ * n ... no of bits to be used
++ */
+ #define RV_X(x, s, n)  (((x) >> (s)) & ((1 << (n)) - 1))
+ #define RV_IMM_SIGN(x) (-(((x) >> 31) & 1))
++#define RV_IMM30_SIGN(x) (-(((x) >> 29) & 1))
++#define RV_IMM28_SIGN(x) (-(((x) >> 27) & 1))
+ 
+ #define EXTRACT_ITYPE_IMM(x) \
+   (RV_X(x, 20, 12) | (RV_IMM_SIGN(x) << 12))
++#define EXTRACT_ITTYPE_IMM(x) \
++  (RV_X(x, 20, 10) | (RV_IMM30_SIGN(x) << 10))
+ #define EXTRACT_STYPE_IMM(x) \
+   (RV_X(x, 7, 5) | (RV_X(x, 25, 7) << 5) | (RV_IMM_SIGN(x) << 12))
++#define EXTRACT_STTYPE_IMM(x) \
++  (RV_X(x, 7, 5) | (RV_X(x, 25, 3) << 5) | (RV_IMM28_SIGN(x) << 8))
+ #define EXTRACT_SBTYPE_IMM(x) \
+   ((RV_X(x, 8, 4) << 1) | (RV_X(x, 25, 6) << 5) | (RV_X(x, 7, 1) << 11) | (RV_IMM_SIGN(x) << 12))
+ #define EXTRACT_UTYPE_IMM(x) \
+@@ -100,8 +116,12 @@ static const char * const riscv_pred_succ[16] =
+ 
+ #define ENCODE_ITYPE_IMM(x) \
+   (RV_X(x, 0, 12) << 20)
++#define ENCODE_ITTYPE_IMM(x) \
++  (RV_X(x, 0, 10) << 20)
+ #define ENCODE_STYPE_IMM(x) \
+   ((RV_X(x, 0, 5) << 7) | (RV_X(x, 5, 7) << 25))
++#define ENCODE_STTYPE_IMM(x) \
++  ((RV_X(x, 0, 5) << 7) | (RV_X(x, 5, 3) << 25))
+ #define ENCODE_SBTYPE_IMM(x) \
+   ((RV_X(x, 1, 4) << 8) | (RV_X(x, 5, 6) << 25) | (RV_X(x, 11, 1) << 7) | (RV_X(x, 12, 1) << 31))
+ #define ENCODE_UTYPE_IMM(x) \
+@@ -172,6 +192,10 @@ static const char * const riscv_pred_succ[16] =
+ 
+ #define RISCV_CONST_HIGH_PART(VALUE) \
+   (((VALUE) + (RISCV_IMM_REACH/2)) & ~(RISCV_IMM_REACH-1))
++#define RISCV_CONST_HIGH22_PART(VALUE) \
++  (((VALUE) + (RISCV_IMM10_REACH/2)) & ~(RISCV_IMM10_REACH-1))
++#define RISCV_CONST_HIGH24_PART(VALUE) \
++  (((VALUE) + (RISCV_IMM8_REACH/2)) & ~(RISCV_IMM8_REACH-1))
+ #define RISCV_CONST_LOW_PART(VALUE) ((VALUE) - RISCV_CONST_HIGH_PART (VALUE))
+ #define RISCV_PCREL_HIGH_PART(VALUE, PC) RISCV_CONST_HIGH_PART((VALUE) - (PC))
+ #define RISCV_PCREL_LOW_PART(VALUE, PC) RISCV_CONST_LOW_PART((VALUE) - (PC))
+@@ -182,8 +206,12 @@ static const char * const riscv_pred_succ[16] =
+ #define RISCV_JUMP_REACH ((1ULL << RISCV_JUMP_BITS) * RISCV_JUMP_ALIGN)
+ 
+ #define RISCV_IMM_BITS 12
++#define RISCV_IMM10_BITS 10
++#define RISCV_IMM8_BITS 8
+ #define RISCV_BIGIMM_BITS (32 - RISCV_IMM_BITS)
+ #define RISCV_IMM_REACH (1LL << RISCV_IMM_BITS)
++#define RISCV_IMM10_REACH (1LL << RISCV_IMM10_BITS)
++#define RISCV_IMM8_REACH (1LL << RISCV_IMM8_BITS)
+ #define RISCV_BIGIMM_REACH (1LL << RISCV_BIGIMM_BITS)
+ #define RISCV_RVC_IMM_REACH (1LL << 6)
+ #define RISCV_BRANCH_BITS RISCV_IMM_BITS
+@@ -217,6 +245,10 @@ static const char * const riscv_pred_succ[16] =
+ #define OP_SH_AQ		26
+ #define OP_MASK_RL		0x1
+ #define OP_SH_RL		25
++#define OP_MASK_ETAG		0x03
++#define OP_SH_ETAG		30
++#define OP_MASK_NTAG		0x03
++#define OP_SH_NTAG		28
+ 
+ #define OP_MASK_CUSTOM_IMM	0x7f
+ #define OP_SH_CUSTOM_IMM	25
+@@ -245,6 +277,7 @@ static const char * const riscv_pred_succ[16] =
+ 
+ #define NGPR 32
+ #define NFPR 32
++#define NTAGS 4
+ 
+ /* Replace bits MASK << SHIFT of STRUCT with the equivalent bits in
+    VALUE << SHIFT.  VALUE is evaluated exactly once.  */
+@@ -317,10 +350,22 @@ enum
+   M_LW,
+   M_LWU,
+   M_LD,
++  M_LBCT,
++  M_LBUCT,
++  M_LHCT,
++  M_LHUCT,
++  M_LWCT,
++  M_LWUCT,
++  M_LDCT,
++  M_LTT,
+   M_SB,
+   M_SH,
+   M_SW,
+   M_SD,
++  M_SBCT,
++  M_SHCT,
++  M_SWCT,
++  M_SDCT,
+   M_FLW,
+   M_FLD,
+   M_FLQ,
+diff --git a/opcodes/riscv-dis.c b/opcodes/riscv-dis.c
+index 2dc76de..9977e61 100644
+--- a/opcodes/riscv-dis.c
++++ b/opcodes/riscv-dis.c
+@@ -264,11 +264,21 @@ print_insn_args (const char *d, insn_t l, bfd_vma pc, disassemble_info *info)
+ 	  print (info->stream, "%d", (int)EXTRACT_ITYPE_IMM (l));
+ 	  break;
+ 
++	case 'Y':
++	  maybe_print_address (pd, rs1, EXTRACT_ITTYPE_IMM (l));
++	  print (info->stream, "%d", (int)EXTRACT_ITTYPE_IMM (l));
++	  break;
++
+ 	case 'q':
+ 	  maybe_print_address (pd, rs1, EXTRACT_STYPE_IMM (l));
+ 	  print (info->stream, "%d", (int)EXTRACT_STYPE_IMM (l));
+ 	  break;
+ 
++	case 'X':
++	  maybe_print_address (pd, rs1, EXTRACT_STTYPE_IMM (l));
++	  print (info->stream, "%d", (int)EXTRACT_STTYPE_IMM (l));
++	  break;
++
+ 	case 'a':
+ 	  info->target = EXTRACT_UJTYPE_IMM (l) + pc;
+ 	  (*info->print_address_func) (info->target, info);
+@@ -339,6 +349,16 @@ print_insn_args (const char *d, insn_t l, bfd_vma pc, disassemble_info *info)
+ 	  print (info->stream, "%d", rs1);
+ 	  break;
+ 
++	case 'e':
++	  print (info->stream, "%s",
++		 riscv_tags[EXTRACT_OPERAND (ETAG, l)]);
++	  break;
++
++	case 'n':
++	  print (info->stream, "%s",
++		 riscv_tags[EXTRACT_OPERAND (NTAG, l)]);
++	  break;
++
+ 	default:
+ 	  /* xgettext:c-format */
+ 	  print (info->stream, _("# internal error, undefined modifier (%c)"),
+diff --git a/opcodes/riscv-opc.c b/opcodes/riscv-opc.c
+index 094541c..50a12b1 100644
+--- a/opcodes/riscv-opc.c
++++ b/opcodes/riscv-opc.c
+@@ -271,10 +271,23 @@ const struct riscv_opcode riscv_opcodes[] =
+ {"lw",        "C",   "Ct,Ck(Cs)",  MATCH_C_LW, MASK_C_LW, match_opcode, INSN_ALIAS },
+ {"lw",        "I",   "d,o(s)",  MATCH_LW, MASK_LW, match_opcode, 0 },
+ {"lw",        "I",   "d,A",  0, (int) M_LW, match_never, INSN_MACRO },
++{"lbct",      "I",   "e,d,Y(s)",  MATCH_LBCT, MASK_LBCT, match_opcode, 0 },
++{"lbct",      "I",   "e,d,A",  0, (int) M_LBCT, match_never, INSN_MACRO },
++{"lbuct",     "I",   "e,d,Y(s)",  MATCH_LBUCT, MASK_LBUCT, match_opcode, 0 },
++{"lbuct",     "I",   "e,d,A",  0, (int) M_LBUCT, match_never, INSN_MACRO },
++{"lhct",      "I",   "e,d,Y(s)",  MATCH_LHCT, MASK_LHCT, match_opcode, 0 },
++{"lhct",      "I",   "e,d,A",  0, (int) M_LHCT, match_never, INSN_MACRO },
++{"lhuct",     "I",   "e,d,Y(s)",  MATCH_LHUCT, MASK_LHUCT, match_opcode, 0 },
++{"lhuct",     "I",   "e,d,A",  0, (int) M_LHUCT, match_never, INSN_MACRO },
++{"lwct",      "I",   "e,d,Y(s)",  MATCH_LWCT, MASK_LWCT, match_opcode, 0 },
++{"lwct",      "I",   "e,d,A",  0, (int) M_LWCT, match_never, INSN_MACRO },
++{"ltt",       "I",   "e,d,Y(s)",  MATCH_LTT, MASK_LTT, match_opcode, 0 },
++{"ltt",       "I",   "e,d,A",  0, (int) M_LTT, match_never, INSN_MACRO },
++{"ltag",      "I",   "d,o(s)", MATCH_LTAG, MASK_LTAG, match_opcode, 0 },
+ {"not",       "I",   "d,s",  MATCH_XORI | MASK_IMM, MASK_XORI | MASK_IMM, match_opcode, INSN_ALIAS },
+ {"ori",       "I",   "d,s,j",  MATCH_ORI, MASK_ORI, match_opcode, 0 },
+-{"or",       "C",   "Cs,Cw,Ct",  MATCH_C_OR, MASK_C_OR, match_opcode, INSN_ALIAS },
+-{"or",       "C",   "Cs,Ct,Cw",  MATCH_C_OR, MASK_C_OR, match_opcode, INSN_ALIAS },
++{"or",        "C",   "Cs,Cw,Ct",  MATCH_C_OR, MASK_C_OR, match_opcode, INSN_ALIAS },
++{"or",        "C",   "Cs,Ct,Cw",  MATCH_C_OR, MASK_C_OR, match_opcode, INSN_ALIAS },
+ {"or",        "I",   "d,s,t",  MATCH_OR, MASK_OR, match_opcode, 0 },
+ {"or",        "I",   "d,s,j",  MATCH_ORI, MASK_ORI, match_opcode, INSN_ALIAS },
+ {"auipc",     "I",   "d,u",  MATCH_AUIPC, MASK_AUIPC, match_opcode, 0 },
+@@ -298,6 +311,13 @@ const struct riscv_opcode riscv_opcodes[] =
+ {"sw",        "C",   "Ct,Ck(Cs)",  MATCH_C_SW, MASK_C_SW, match_opcode, INSN_ALIAS },
+ {"sw",        "I",   "t,q(s)",  MATCH_SW, MASK_SW, match_opcode, 0 },
+ {"sw",        "I",   "t,A,s",  0, (int) M_SW, match_never, INSN_MACRO },
++{"sbct",      "I",   "e,n,t,X(s)",  MATCH_SBCT, MASK_SBCT, match_opcode, 0 },
++{"sbct",      "I",   "e,n,t,A,s",  0, (int) M_SBCT, match_never, INSN_MACRO },
++{"shct",      "I",   "e,n,t,X(s)",  MATCH_SHCT, MASK_SHCT, match_opcode, 0 },
++{"shct",      "I",   "e,n,t,A,s",  0, (int) M_SHCT, match_never, INSN_MACRO },
++{"swct",      "I",   "e,n,t,X(s)",  MATCH_SWCT, MASK_SWCT, match_opcode, 0 },
++{"swct",      "I",   "e,n,t,A,s",  0, (int) M_SWCT, match_never, INSN_MACRO },
++{"stag",      "I",   "t,q(s)",  MATCH_STAG, MASK_STAG, match_opcode, 0 },
+ {"fence",     "I",   "",  MATCH_FENCE | MASK_PRED | MASK_SUCC, MASK_FENCE | MASK_RD | MASK_RS1 | MASK_IMM, match_opcode, INSN_ALIAS },
+ {"fence",     "I",   "P,Q",  MATCH_FENCE, MASK_FENCE | MASK_RD | MASK_RS1 | (MASK_IMM & ~MASK_PRED & ~MASK_SUCC), match_opcode, 0 },
+ {"fence.i",   "I",   "",  MATCH_FENCE_I, MASK_FENCE | MASK_RD | MASK_RS1 | MASK_IMM, match_opcode, 0 },
+@@ -316,14 +336,20 @@ const struct riscv_opcode riscv_opcodes[] =
+ {"xor",       "I",   "d,s,j",  MATCH_XORI, MASK_XORI, match_opcode, INSN_ALIAS },
+ {"lwu",       "64I", "d,o(s)",  MATCH_LWU, MASK_LWU, match_opcode, 0 },
+ {"lwu",       "64I", "d,A",  0, (int) M_LWU, match_never, INSN_MACRO },
++{"lwuct",     "64I", "e,d,Y(s)",  MATCH_LWUCT, MASK_LWUCT, match_opcode, 0 },
++{"lwuct",     "64I", "e,d,A",  0, (int) M_LWUCT, match_never, INSN_MACRO },
+ {"ld",        "64C", "d,Cn(Cc)",  MATCH_C_LDSP, MASK_C_LDSP, match_rd_nonzero, INSN_ALIAS },
+ {"ld",        "64C", "Ct,Cl(Cs)",  MATCH_C_LD, MASK_C_LD, match_opcode, INSN_ALIAS },
+ {"ld",        "64I", "d,o(s)", MATCH_LD, MASK_LD, match_opcode, 0 },
+ {"ld",        "64I", "d,A",  0, (int) M_LD, match_never, INSN_MACRO },
++{"ldct",      "64I", "e,d,Y(s)", MATCH_LDCT, MASK_LDCT, match_opcode, 0 },
++{"ldct",      "64I", "e,d,A",  0, (int) M_LDCT, match_never, INSN_MACRO },
+ {"sd",        "64C", "CV,CN(Cc)",  MATCH_C_SDSP, MASK_C_SDSP, match_opcode, INSN_ALIAS },
+ {"sd",        "64C", "Ct,Cl(Cs)",  MATCH_C_SD, MASK_C_SD, match_opcode, INSN_ALIAS },
+ {"sd",        "64I", "t,q(s)",  MATCH_SD, MASK_SD, match_opcode, 0 },
+ {"sd",        "64I", "t,A,s",  0, (int) M_SD, match_never, INSN_MACRO },
++{"sdct",      "64I", "e,n,t,X(s)",  MATCH_SDCT, MASK_SDCT, match_opcode, 0 },
++{"sdct",      "64I", "e,n,t,A,s",  0, (int) M_SDCT, match_never, INSN_MACRO },
+ {"sext.w",    "64C", "d,CU",  MATCH_C_ADDIW, MASK_C_ADDIW | MASK_RVC_IMM, match_rd_nonzero, INSN_ALIAS },
+ {"sext.w",    "64I", "d,s",  MATCH_ADDIW, MASK_ADDIW | MASK_IMM, match_opcode, INSN_ALIAS },
+ {"addiw",     "64C", "d,CU,Co",  MATCH_C_ADDIW, MASK_C_ADDIW, match_rd_nonzero, INSN_ALIAS },
+@@ -720,11 +746,8 @@ const struct riscv_opcode riscv_opcodes[] =
+ {"csrrc",     "I",   "d,E,Z",  MATCH_CSRRCI, MASK_CSRRCI, match_opcode, INSN_ALIAS },
+ {"uret",      "I",   "",     MATCH_URET, MASK_URET, match_opcode, 0 },
+ {"sret",      "I",   "",     MATCH_SRET, MASK_SRET, match_opcode, 0 },
+-{"hret",      "I",   "",     MATCH_HRET, MASK_HRET, match_opcode, 0 },
+ {"mret",      "I",   "",     MATCH_MRET, MASK_MRET, match_opcode, 0 },
+ {"dret",      "I",   "",     MATCH_DRET, MASK_DRET, match_opcode, 0 },
+-{"sfence.vm", "I",   "",     MATCH_SFENCE_VM, MASK_SFENCE_VM | MASK_RS1, match_opcode, 0 },
+-{"sfence.vm", "I",   "s",    MATCH_SFENCE_VM, MASK_SFENCE_VM, match_opcode, 0 },
+ {"sfence.vma","I",   "",     MATCH_SFENCE_VMA, MASK_SFENCE_VMA | MASK_RS1 | MASK_RS2, match_opcode, INSN_ALIAS },
+ {"sfence.vma","I",   "s",    MATCH_SFENCE_VMA, MASK_SFENCE_VMA | MASK_RS2, match_opcode, INSN_ALIAS },
+ {"sfence.vma","I",   "s,t",  MATCH_SFENCE_VMA, MASK_SFENCE_VMA, match_opcode, 0 },
+diff --git a/sim/riscv/tconfig.h b/sim/riscv/tconfig.h
+new file mode 100644
+index 0000000..25e6a79
+--- /dev/null
++++ b/sim/riscv/tconfig.h
+@@ -0,0 +1,4 @@
++/* RISC-V target configuration file.  -*- C -*- */
++
++/* ??? Temporary hack until model support unified.  */
++#define SIM_HAVE_MODEL
